@@ -11,6 +11,14 @@ type bot struct {
 	api *tba.Bot
 }
 
+func SendMessage(b *bot, chat int64, message string, sendOptions *tba.SendOptions) {
+	tmpChat := tba.chat{ID: chat, Title: "", FirstName: "", LastName: "", Type: "", Username: ""}
+	_, err := b.api.Send(&tmpChat, message, sendOpt)
+	if err != nil {
+		print("Error sendind message to %d", chat)
+	}
+}
+
 func (b *bot) Run() {
 	b.api.Handle("/version", func(m *tba.Message) {
 		_, err := b.api.Send(m.Chat, "v 0.0.1")
