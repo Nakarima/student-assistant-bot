@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io/ioutil"
 	"log"
+	"os"
 	"time"
 
 	tba "gopkg.in/tucnak/telebot.v2" //telegram bot api
@@ -20,6 +21,15 @@ const flashcardsFileName = "flashcards.json"
 func defaultSendOpt(m *tba.Message) *tba.SendOptions {
 	return &tba.SendOptions{
 		ReplyTo: m,
+	}
+}
+
+func ensureDataFileExists(fileName string) {
+	if _, err := os.Stat(fileName); err != nil {
+		err = ioutil.WriteFile(fileName, []byte("{}"), 0644)
+		if err != nil {
+			log.Fatalf("could not create %s", fileName)
+		}
 	}
 }
 
@@ -51,14 +61,14 @@ func NewBot(token string) *bot {
 	}
 
 	flashcards := make(map[string]string)
+	ensureDataFileExists(flashcardsFileName)
 	flashcardsData, err := ioutil.ReadFile(flashcardsFileName)
 	if err != nil {
-		log.Printf("Could not read %s", flashcardsFileName)
-	} else {
-		err = json.Unmarshal([]byte(flashcardsData), &flashcards)
-		if err != nil {
-			log.Printf("Could not decode %s", flashcardsFileName)
-		}
+		log.Fatalf("Could not read %s", flashcardsFileName)
+	}
+	err = json.Unmarshal([]byte(flashcardsData), &flashcards)
+	if err != nil {
+		log.Fatalf("Could not decode %s", flashcardsFileName)
 	}
 
 	log.Printf("Bot authorized")
