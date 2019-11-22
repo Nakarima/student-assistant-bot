@@ -1,6 +1,9 @@
 package main
 
 import (
+	//"bytes"
+	"encoding/json"
+	"io/ioutil"
 	"log"
 	"time"
 
@@ -8,10 +11,13 @@ import (
 )
 
 type bot struct {
-	api *tba.Bot
+	api        *tba.Bot
+	flashcards map[string]string
 }
 
-func DefaultSendOpt(m *tba.Message) *tba.SendOptions {
+const flashcardsFileName = "flashcards.json"
+
+func defaultSendOpt(m *tba.Message) *tba.SendOptions {
 	return &tba.SendOptions{
 		ReplyTo: m,
 	}
@@ -20,17 +26,15 @@ func DefaultSendOpt(m *tba.Message) *tba.SendOptions {
 func SendMessage(b *bot, chat int64, message string, sendOpt *tba.SendOptions) error {
 	tmpChat := tba.Chat{ID: chat, Title: "", FirstName: "", LastName: "", Type: "", Username: ""}
 	_, err := b.api.Send(&tmpChat, message, sendOpt)
-	if err != nil {
-		print("Error sending message to %d", chat)
-	}
+
 	return err
 }
 
 func (b *bot) Run() {
 	b.api.Handle("/version", func(m *tba.Message) {
-		err := SendMessage(b, m.Chat.ID, "version 0.0.1", DefaultSendOpt(m))
+		err := SendMessage(b, m.Chat.ID, "version 0.0.1", defaultSendOpt(m))
 		if err != nil {
-			log.Fatal("error sending version")
+			log.Printf("error sending version to %d", m.Chat.ID)
 		}
 	})
 
@@ -46,6 +50,17 @@ func NewBot(token string) *bot {
 		log.Fatal("Could not create bot")
 	}
 
+	flashcards := make(map[string]string)
+	flashcardsData, err := ioutil.ReadFile(flashcardsFileName)
+	if err != nil {
+		log.Printf("Could not read %s", flashcardsFileName)
+	} else {
+		err = json.Unmarshal([]byte(flashcardsData), &flashcards)
+		if err != nil {
+			log.Printf("Could not decode %s", flashcardsFileName)
+		}
+	}
+
 	log.Printf("Bot authorized")
-	return &bot{tb}
+	return &bot{tb, flashcards}
 }
