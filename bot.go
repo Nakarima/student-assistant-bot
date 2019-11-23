@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	tba "gopkg.in/tucnak/telebot.v2" //telegram bot api
@@ -48,12 +49,15 @@ func GetAnswer(b *bot, chatID int64, answer chan string) {
 	})
 }
 
-func SendMessage(b *bot, chat int64, message string, sendOpt *tba.SendOptions) error {
+func SendMessage(b *bot, chat int64, message string, sendOpt *tba.SendOptions) {
 
 	tmpChat := tba.Chat{ID: chat, Title: "", FirstName: "", LastName: "", Type: "", Username: ""}
 	_, err := b.api.Send(&tmpChat, message, sendOpt)
 
-	return err
+	if err != nil {
+		log.Printf("Could not send message %s to %d", message, chat)
+	}
+
 }
 
 //TODO: make it work for multiple users at the same time
@@ -78,6 +82,7 @@ func addFlashcard(b *bot, chatID int64) {
 
 		b.flashcards[chatID] = make(map[string]map[string]string)
 	}
+
 	if b.flashcards[chatID][subject] == nil {
 
 		b.flashcards[chatID][subject] = make(map[string]string)
@@ -85,12 +90,14 @@ func addFlashcard(b *bot, chatID int64) {
 	b.flashcards[chatID][subject][term] = definition
 
 	flashcardsJson, err := json.Marshal(b.flashcards)
+
 	if err != nil {
 		log.Print("Could not encode flashcards")
 		SendMessage(b, chatID, "Wystapil problem, sprobuj pozniej", &tba.SendOptions{})
 		return
 	}
 	err = ioutil.WriteFile(flashcardsFileName, flashcardsJson, 0644)
+
 	if err != nil {
 		log.Print("Could not write flashcards")
 		SendMessage(b, chatID, "Wystapil problem, sprobuj pozniej", &tba.SendOptions{})
@@ -101,21 +108,47 @@ func addFlashcard(b *bot, chatID int64) {
 
 }
 
+func findFlashcard(b *bot, m *tba.Message) {
+
+	chatID := m.Chat.ID
+
+	if m.Text == "/fiszka" {
+		SendMessage(b, chatID, "Podaj pojecie po spacji", defaultSendOpt(m))
+		return
+	}
+
+	term := strings.ReplaceAll(m.Text, "/fiszka ", "")
+	tmp := b.flashcards[chatID]
+
+	for _, value := range tmp {
+
+		if val, ok := value[term]; ok {
+
+			SendMessage(b, chatID, val, defaultSendOpt(m))
+			return
+		}
+	}
+
+	SendMessage(b, chatID, "Nie znaleziono pojecia", defaultSendOpt(m))
+}
+
 func (b *bot) Run() {
 
 	b.api.Handle("/version", func(m *tba.Message) {
 
-		err := SendMessage(b, m.Chat.ID, "version 0.0.2", defaultSendOpt(m))
-		if err != nil {
-
-			log.Printf("error sending version to %d", m.Chat.ID)
-		}
+		SendMessage(b, m.Chat.ID, "version 0.0.3", defaultSendOpt(m))
 	})
 
 	b.api.Handle("/dodajfiszke", func(m *tba.Message) {
 
 		go addFlashcard(b, m.Chat.ID)
 	})
+
+	b.api.Handle("/fiszka", func(m *tba.Message) {
+
+		findFlashcard(b, m)
+	})
+
 	b.api.Start()
 }
 
