@@ -57,10 +57,9 @@ func SendMessage(b *bot, chat int64, message string, sendOpt *tba.SendOptions) {
 	if err != nil {
 		log.Printf("Could not send message %s to %d", message, chat)
 	}
-
 }
 
-//TODO: make it work for multiple users at the same time
+//TODO: make it work for multiple users at the same time, then make edit and delete
 func addFlashcard(b *bot, chatID int64) {
 
 	subjectChan := make(chan string)
@@ -72,6 +71,11 @@ func addFlashcard(b *bot, chatID int64) {
 	SendMessage(b, chatID, "Podaj pojecie", &tba.SendOptions{})
 	GetAnswer(b, chatID, termChan)
 	term := <-termChan
+
+	if _, ok := b.flashcards[chatID][subject][term]; ok {
+		SendMessage(b, chatID, "Fiszka juz istnieje", &tba.SendOptions{})
+		return
+	}
 
 	definitionChan := make(chan string)
 	SendMessage(b, chatID, "Podaj definicje", &tba.SendOptions{})
@@ -87,6 +91,7 @@ func addFlashcard(b *bot, chatID int64) {
 
 		b.flashcards[chatID][subject] = make(map[string]string)
 	}
+
 	b.flashcards[chatID][subject][term] = definition
 
 	flashcardsJson, err := json.Marshal(b.flashcards)
@@ -96,6 +101,7 @@ func addFlashcard(b *bot, chatID int64) {
 		SendMessage(b, chatID, "Wystapil problem, sprobuj pozniej", &tba.SendOptions{})
 		return
 	}
+
 	err = ioutil.WriteFile(flashcardsFileName, flashcardsJson, 0644)
 
 	if err != nil {
@@ -105,7 +111,6 @@ func addFlashcard(b *bot, chatID int64) {
 	}
 
 	SendMessage(b, chatID, "Dodano fiszke", &tba.SendOptions{})
-
 }
 
 func findFlashcard(b *bot, m *tba.Message) {
@@ -119,17 +124,26 @@ func findFlashcard(b *bot, m *tba.Message) {
 
 	term := strings.ReplaceAll(m.Text, "/fiszka ", "")
 	tmp := b.flashcards[chatID]
+	flashcardFound := false
 
-	for _, value := range tmp {
+	for subject, val := range tmp {
 
-		if val, ok := value[term]; ok {
+		if definition, ok := val[term]; ok {
 
-			SendMessage(b, chatID, val, defaultSendOpt(m))
-			return
+			flashcardFound = true
+			SendMessage(
+				b,
+				chatID,
+				subject+", "+term+" - "+definition,
+				defaultSendOpt(m),
+			)
 		}
 	}
 
-	SendMessage(b, chatID, "Nie znaleziono pojecia", defaultSendOpt(m))
+	if !flashcardFound {
+
+		SendMessage(b, chatID, "Nie znaleziono pojecia", defaultSendOpt(m))
+	}
 }
 
 func (b *bot) Run() {
