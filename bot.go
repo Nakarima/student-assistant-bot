@@ -17,6 +17,11 @@ type bot struct {
 	flashcards map[int64]map[string]map[string]string
 }
 
+type msg struct {
+	chatID int64
+	text   string
+}
+
 const flashcardsFileName = "flashcards.json"
 
 func defaultSendOpt(m *tba.Message) *tba.SendOptions {
@@ -39,6 +44,7 @@ func ensureDataFileExists(fileName string) {
 	}
 }
 
+// GetAnswer reads data from users message
 func GetAnswer(b *bot, chatID int64, answer chan string) {
 
 	b.api.Handle(tba.OnText, func(m *tba.Message) {
@@ -148,9 +154,22 @@ func findFlashcard(b *bot, m *tba.Message) {
 
 func (b *bot) Run() {
 
+	//channels := make(map[int64]chan string)
+	outChannel := make(chan msg)
+
+	go func(out chan msg) {
+		for {
+			select {
+
+			case m := <-out:
+				SendMessage(b, m.chatID, m.text, &tba.SendOptions{})
+			}
+		}
+	}(outChannel)
+
 	b.api.Handle("/version", func(m *tba.Message) {
 
-		SendMessage(b, m.Chat.ID, "version 0.0.3", defaultSendOpt(m))
+		outChannel <- msg{m.Chat.ID, "version 0.0.3"}
 	})
 
 	b.api.Handle("/dodajfiszke", func(m *tba.Message) {
