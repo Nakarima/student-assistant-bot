@@ -3,6 +3,7 @@ package main
 import (
 	//"bytes"
 	"encoding/json"
+	"errors"
 	"io/ioutil"
 	"log"
 	"os"
@@ -15,6 +16,8 @@ import (
 type bot struct {
 	api        *tba.Bot
 	flashcards map[int64]map[string]map[string]string
+	input      map[int64]chan string
+	output     chan msg
 }
 
 type msg struct {
@@ -41,25 +44,14 @@ func ensureDataFileExists(fileName string) {
 	}
 }
 
-func output(out chan msg, b *bot) {
+func output(b *bot) {
 	for {
 		select {
 
-		case m := <-out:
+		case m := <-b.output:
 			SendMessage(b, m.chatID, m.text, defaultSendOpt())
 		}
 	}
-}
-
-// GetAnswer reads data from users message
-func GetAnswer(b *bot, chatID int64, answer chan string) {
-
-	b.api.Handle(tba.OnText, func(m *tba.Message) {
-
-		if chatID == m.Chat.ID {
-			answer <- m.Text
-		}
-	})
 }
 
 func SendMessage(b *bot, chat int64, message string, sendOpt *tba.SendOptions) {
@@ -72,22 +64,47 @@ func SendMessage(b *bot, chat int64, message string, sendOpt *tba.SendOptions) {
 	}
 }
 
-//TODO: make it work for multiple users at the same time, then make edit and delete
+func getAnswer(in chan string) (string, error) {
+
+	timeout := 0
+	for timeout < 1200 {
+
+		select {
+
+		case a := <-in:
+			return a, nil
+		default:
+			time.Sleep(250 * time.Millisecond)
+			timeout++
+		}
+	}
+
+	return "", errors.New("timeout")
+}
+
+func timeout(out chan msg, chatID int64) {
+
+	out <- msg{chatID, "Przekroczono czas odpowiedzi"}
+}
+
 func addFlashcard(flashcards map[int64]map[string]map[string]string, chatID int64, out chan msg, in chan string) {
 
-	var subject string
-	var term string
-	var definition string
 	out <- msg{chatID, "Podaj temat fiszki"}
-	select {
-	case a := <-in:
-		subject = a
+	subject, err := getAnswer(in)
+
+	if err != nil {
+
+		timeout(out, chatID)
+		return
 	}
 
 	out <- msg{chatID, "Podaj pojecie"}
-	select {
-	case a := <-in:
-		term = a
+	term, err := getAnswer(in)
+
+	if err != nil {
+
+		timeout(out, chatID)
+		return
 	}
 
 	if _, ok := flashcards[chatID][subject][term]; ok {
@@ -96,9 +113,12 @@ func addFlashcard(flashcards map[int64]map[string]map[string]string, chatID int6
 	}
 
 	out <- msg{chatID, "Podaj definicje"}
-	select {
-	case a := <-in:
-		definition = a
+	definition, err := getAnswer(in)
+
+	if err != nil {
+
+		timeout(out, chatID)
+		return
 	}
 
 	if flashcards[chatID] == nil {
@@ -164,31 +184,28 @@ func findFlashcard(flashcards map[string]map[string]string, m *tba.Message, outp
 
 func (b *bot) Run() {
 
-	channels := make(map[int64]chan string)
-	outChannel := make(chan msg)
-
-	go output(outChannel, b)
+	go output(b)
 
 	b.api.Handle("/version", func(m *tba.Message) {
 
-		outChannel <- msg{m.Chat.ID, "version 0.0.3"}
+		b.output <- msg{m.Chat.ID, "version 0.0.3"}
 	})
 
 	//single line commands don't stop routines
 	b.api.Handle("/fiszka", func(m *tba.Message) {
 
-		findFlashcard(b.flashcards[m.Chat.ID], m, outChannel)
+		findFlashcard(b.flashcards[m.Chat.ID], m, b.output)
 	})
 
 	b.api.Handle("/dodajfiszke", func(m *tba.Message) {
 
-		channels[m.Chat.ID] = make(chan string)
-		go addFlashcard(b.flashcards, m.Chat.ID, outChannel, channels[m.Chat.ID])
+		b.input[m.Chat.ID] = make(chan string)
+		go addFlashcard(b.flashcards, m.Chat.ID, b.output, b.input[m.Chat.ID])
 	})
 
 	b.api.Handle(tba.OnText, func(m *tba.Message) {
 
-		channels[m.Chat.ID] <- m.Text
+		b.input[m.Chat.ID] <- m.Text
 	})
 
 	b.api.Start()
@@ -223,6 +240,9 @@ func NewBot(token string) *bot {
 		log.Fatalf("Could not decode %s", flashcardsFileName)
 	}
 
+	input := make(map[int64]chan string)
+	output := make(chan msg)
+
 	log.Printf("Bot authorized")
-	return &bot{tb, flashcards}
+	return &bot{tb, flashcards, input, output}
 }
