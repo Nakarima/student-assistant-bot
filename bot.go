@@ -24,12 +24,9 @@ type msg struct {
 
 const flashcardsFileName = "flashcards.json"
 
-func defaultSendOpt(m *tba.Message) *tba.SendOptions {
+func defaultSendOpt() *tba.SendOptions {
 
-	return &tba.SendOptions{
-
-		ReplyTo: m,
-	}
+	return &tba.SendOptions{}
 }
 
 func ensureDataFileExists(fileName string) {
@@ -40,6 +37,16 @@ func ensureDataFileExists(fileName string) {
 		if err != nil {
 
 			log.Fatalf("could not create %s", fileName)
+		}
+	}
+}
+
+func output(out chan msg, b *bot) {
+	for {
+		select {
+
+		case m := <-out:
+			SendMessage(b, m.chatID, m.text, defaultSendOpt())
 		}
 	}
 }
@@ -66,45 +73,51 @@ func SendMessage(b *bot, chat int64, message string, sendOpt *tba.SendOptions) {
 }
 
 //TODO: make it work for multiple users at the same time, then make edit and delete
-func addFlashcard(b *bot, chatID int64) {
+func addFlashcard(flashcards map[int64]map[string]map[string]string, chatID int64, out chan msg, in chan string) {
 
-	subjectChan := make(chan string)
-	SendMessage(b, chatID, "Podaj temat fiszki", &tba.SendOptions{})
-	GetAnswer(b, chatID, subjectChan)
-	subject := <-subjectChan
+	var subject string
+	var term string
+	var definition string
+	out <- msg{chatID, "Podaj temat fiszki"}
+	select {
+	case a := <-in:
+		subject = a
+	}
 
-	termChan := make(chan string)
-	SendMessage(b, chatID, "Podaj pojecie", &tba.SendOptions{})
-	GetAnswer(b, chatID, termChan)
-	term := <-termChan
+	out <- msg{chatID, "Podaj pojecie"}
+	select {
+	case a := <-in:
+		term = a
+	}
 
-	if _, ok := b.flashcards[chatID][subject][term]; ok {
-		SendMessage(b, chatID, "Fiszka juz istnieje", &tba.SendOptions{})
+	if _, ok := flashcards[chatID][subject][term]; ok {
+		out <- msg{chatID, "Fiszka juz istnieje"}
 		return
 	}
 
-	definitionChan := make(chan string)
-	SendMessage(b, chatID, "Podaj definicje", &tba.SendOptions{})
-	GetAnswer(b, chatID, definitionChan)
-	definition := <-definitionChan
-
-	if b.flashcards[chatID] == nil {
-
-		b.flashcards[chatID] = make(map[string]map[string]string)
+	out <- msg{chatID, "Podaj definicje"}
+	select {
+	case a := <-in:
+		definition = a
 	}
 
-	if b.flashcards[chatID][subject] == nil {
+	if flashcards[chatID] == nil {
 
-		b.flashcards[chatID][subject] = make(map[string]string)
+		flashcards[chatID] = make(map[string]map[string]string)
 	}
 
-	b.flashcards[chatID][subject][term] = definition
+	if flashcards[chatID][subject] == nil {
 
-	flashcardsJson, err := json.Marshal(b.flashcards)
+		flashcards[chatID][subject] = make(map[string]string)
+	}
+
+	flashcards[chatID][subject][term] = definition
+
+	flashcardsJson, err := json.Marshal(flashcards)
 
 	if err != nil {
 		log.Print("Could not encode flashcards")
-		SendMessage(b, chatID, "Wystapil problem, sprobuj pozniej", &tba.SendOptions{})
+		out <- msg{chatID, "Wystapil problem, sprobuj pozniej"}
 		return
 	}
 
@@ -112,74 +125,70 @@ func addFlashcard(b *bot, chatID int64) {
 
 	if err != nil {
 		log.Print("Could not write flashcards")
-		SendMessage(b, chatID, "Wystapil problem, sprobuj pozniej", &tba.SendOptions{})
+		out <- msg{chatID, "Wystapil problem, sprobuj pozniej"}
 		return
 	}
 
-	SendMessage(b, chatID, "Dodano fiszke", &tba.SendOptions{})
+	out <- msg{chatID, "Dodano fiszke"}
 }
 
-func findFlashcard(b *bot, m *tba.Message) {
+func findFlashcard(flashcards map[string]map[string]string, m *tba.Message, output chan msg) {
 
 	chatID := m.Chat.ID
 
 	if m.Text == "/fiszka" {
-		SendMessage(b, chatID, "Podaj pojecie po spacji", defaultSendOpt(m))
+		output <- msg{chatID, "Podaj pojecie po spacji"}
 		return
 	}
 
 	term := strings.ReplaceAll(m.Text, "/fiszka ", "")
-	tmp := b.flashcards[chatID]
 	flashcardFound := false
 
-	for subject, val := range tmp {
+	for subject, val := range flashcards {
 
 		if definition, ok := val[term]; ok {
 
 			flashcardFound = true
-			SendMessage(
-				b,
+			output <- msg{
 				chatID,
-				subject+", "+term+" - "+definition,
-				defaultSendOpt(m),
-			)
+				subject + ", " + term + " - " + definition,
+			}
 		}
 	}
 
 	if !flashcardFound {
 
-		SendMessage(b, chatID, "Nie znaleziono pojecia", defaultSendOpt(m))
+		output <- msg{chatID, "Nie znaleziono pojecia"}
 	}
 }
 
 func (b *bot) Run() {
 
-	//channels := make(map[int64]chan string)
+	channels := make(map[int64]chan string)
 	outChannel := make(chan msg)
 
-	go func(out chan msg) {
-		for {
-			select {
-
-			case m := <-out:
-				SendMessage(b, m.chatID, m.text, &tba.SendOptions{})
-			}
-		}
-	}(outChannel)
+	go output(outChannel, b)
 
 	b.api.Handle("/version", func(m *tba.Message) {
 
 		outChannel <- msg{m.Chat.ID, "version 0.0.3"}
 	})
 
-	b.api.Handle("/dodajfiszke", func(m *tba.Message) {
-
-		go addFlashcard(b, m.Chat.ID)
-	})
-
+	//single line commands don't stop routines
 	b.api.Handle("/fiszka", func(m *tba.Message) {
 
-		findFlashcard(b, m)
+		findFlashcard(b.flashcards[m.Chat.ID], m, outChannel)
+	})
+
+	b.api.Handle("/dodajfiszke", func(m *tba.Message) {
+
+		channels[m.Chat.ID] = make(chan string)
+		go addFlashcard(b.flashcards, m.Chat.ID, outChannel, channels[m.Chat.ID])
+	})
+
+	b.api.Handle(tba.OnText, func(m *tba.Message) {
+
+		channels[m.Chat.ID] <- m.Text
 	})
 
 	b.api.Start()
