@@ -13,7 +13,8 @@ import (
 	tba "gopkg.in/tucnak/telebot.v2" //telegram bot api
 )
 
-type bot struct {
+//Bot is main structure with access to api, users data and necessary channels
+type Bot struct {
 	api           *tba.Bot
 	flashcards    map[int64]map[string]map[string]string
 	input         map[int64]chan string
@@ -45,12 +46,14 @@ func ensureDataFileExists(fileName string) {
 	}
 }
 
-func output(b *bot) {
+func output(b *Bot) {
+
 	for {
+
 		select {
 
 		case m := <-b.output:
-			SendMessage(b, m.chatID, m.text, defaultSendOpt())
+			sendMessage(b, m.chatID, m.text, defaultSendOpt())
 		}
 	}
 }
@@ -65,12 +68,13 @@ func inputKiller(c chan int64, m map[int64]chan string) {
 		}
 	}
 }
-func SendMessage(b *bot, chat int64, message string, sendOpt *tba.SendOptions) {
+func sendMessage(b *Bot, chat int64, message string, sendOpt *tba.SendOptions) {
 
 	tmpChat := tba.Chat{ID: chat, Title: "", FirstName: "", LastName: "", Type: "", Username: ""}
 	_, err := b.api.Send(&tmpChat, message, sendOpt)
 
 	if err != nil {
+
 		log.Printf("Could not send message %s to %d", message, chat)
 	}
 }
@@ -78,7 +82,7 @@ func SendMessage(b *bot, chat int64, message string, sendOpt *tba.SendOptions) {
 func getAnswer(in chan string) (string, error) {
 
 	timeout := 0
-	for timeout < 12 {
+	for timeout < 1200 {
 
 		select {
 
@@ -93,45 +97,41 @@ func getAnswer(in chan string) (string, error) {
 	return "", errors.New("timeout")
 }
 
-func timeout(out chan msg, chatID int64) {
+func dialog(out chan msg, chatID int64, question string, in chan string) (string, error) {
 
-	out <- msg{chatID, "Przekroczono czas odpowiedzi"}
+	out <- msg{chatID, question}
+	a, err := getAnswer(in)
+	if err != nil {
+
+		out <- msg{chatID, "Przekroczono czas odpowiedzi"}
+	}
+	return a, err
+
 }
 
 func addFlashcard(flashcards map[int64]map[string]map[string]string, chatID int64, out chan msg, in chan string, state chan int64) {
 
-	out <- msg{chatID, "Podaj temat fiszki"}
-	subject, err := getAnswer(in)
-
+	topic, err := dialog(out, chatID, "Podaj temat", in)
 	if err != nil {
-
-		timeout(out, chatID)
 		state <- chatID
 		return
 	}
 
-	out <- msg{chatID, "Podaj pojecie"}
-	term, err := getAnswer(in)
-
+	term, err := dialog(out, chatID, "Podaj pojecie", in)
 	if err != nil {
-
-		timeout(out, chatID)
 		state <- chatID
 		return
 	}
 
-	if _, ok := flashcards[chatID][subject][term]; ok {
+	if _, ok := flashcards[chatID][topic][term]; ok {
+
 		out <- msg{chatID, "Fiszka juz istnieje"}
 		state <- chatID
 		return
 	}
 
-	out <- msg{chatID, "Podaj definicje"}
-	definition, err := getAnswer(in)
-
+	definition, err := dialog(out, chatID, "Podaj definicje", in)
 	if err != nil {
-
-		timeout(out, chatID)
 		state <- chatID
 		return
 	}
@@ -141,15 +141,14 @@ func addFlashcard(flashcards map[int64]map[string]map[string]string, chatID int6
 		flashcards[chatID] = make(map[string]map[string]string)
 	}
 
-	if flashcards[chatID][subject] == nil {
+	if flashcards[chatID][topic] == nil {
 
-		flashcards[chatID][subject] = make(map[string]string)
+		flashcards[chatID][topic] = make(map[string]string)
 	}
 
-	flashcards[chatID][subject][term] = definition
+	flashcards[chatID][topic][term] = definition
 
-	flashcardsJson, err := json.Marshal(flashcards)
-
+	flashcardsJSON, err := json.Marshal(flashcards)
 	if err != nil {
 		log.Print("Could not encode flashcards")
 		out <- msg{chatID, "Wystapil problem, sprobuj pozniej"}
@@ -157,8 +156,7 @@ func addFlashcard(flashcards map[int64]map[string]map[string]string, chatID int6
 		return
 	}
 
-	err = ioutil.WriteFile(flashcardsFileName, flashcardsJson, 0644)
-
+	err = ioutil.WriteFile(flashcardsFileName, flashcardsJSON, 0644)
 	if err != nil {
 		log.Print("Could not write flashcards")
 		out <- msg{chatID, "Wystapil problem, sprobuj pozniej"}
@@ -170,7 +168,7 @@ func addFlashcard(flashcards map[int64]map[string]map[string]string, chatID int6
 	state <- chatID
 }
 
-func findFlashcard(flashcards map[string]map[string]string, m *tba.Message, output chan msg) {
+func displayFlashcard(flashcards map[string]map[string]string, m *tba.Message, output chan msg) {
 
 	chatID := m.Chat.ID
 
@@ -200,7 +198,55 @@ func findFlashcard(flashcards map[string]map[string]string, m *tba.Message, outp
 	}
 }
 
-func (b *bot) Run() {
+func deleteFlashcard(flashcards map[int64]map[string]map[string]string, chatID int64, out chan msg, in chan string, state chan int64) {
+
+	topic, err := dialog(out, chatID, "Podaj temat", in)
+	if err != nil {
+		state <- chatID
+		return
+	}
+
+	term, err := dialog(out, chatID, "Podaj pojecie", in)
+	if err != nil {
+		state <- chatID
+		return
+	}
+
+	if _, ok := flashcards[chatID][topic][term]; !ok {
+
+		out <- msg{chatID, "Fiszka nie istnieje"}
+		state <- chatID
+		return
+	}
+
+	delete(flashcards[chatID][topic], term)
+
+	if flashcards[chatID][topic] == nil {
+		delete(flashcards[chatID], topic)
+	}
+
+	flashcardsJSON, err := json.Marshal(flashcards)
+	if err != nil {
+		log.Print("Could not encode flashcards")
+		out <- msg{chatID, "Wystapil problem, sprobuj pozniej"}
+		state <- chatID
+		return
+	}
+
+	err = ioutil.WriteFile(flashcardsFileName, flashcardsJSON, 0644)
+	if err != nil {
+		log.Print("Could not write flashcards")
+		out <- msg{chatID, "Wystapil problem, sprobuj pozniej"}
+		state <- chatID
+		return
+	}
+
+	out <- msg{chatID, "Usunieto fiszke"}
+	state <- chatID
+}
+
+//Run starts all handlers and listeners for bot
+func (b *Bot) Run() {
 
 	go output(b)
 
@@ -208,19 +254,25 @@ func (b *bot) Run() {
 
 	b.api.Handle("/version", func(m *tba.Message) {
 
-		b.output <- msg{m.Chat.ID, "version 0.0.4"}
+		b.output <- msg{m.Chat.ID, "version 0.0.5"}
 	})
 
 	//single line commands don't stop routines
 	b.api.Handle("/fiszka", func(m *tba.Message) {
 
-		findFlashcard(b.flashcards[m.Chat.ID], m, b.output)
+		displayFlashcard(b.flashcards[m.Chat.ID], m, b.output)
 	})
 
 	b.api.Handle("/dodajfiszke", func(m *tba.Message) {
 
 		b.input[m.Chat.ID] = make(chan string)
 		go addFlashcard(b.flashcards, m.Chat.ID, b.output, b.input[m.Chat.ID], b.inactiveInput)
+	})
+
+	b.api.Handle("/usunfiszke", func(m *tba.Message) {
+
+		b.input[m.Chat.ID] = make(chan string)
+		go deleteFlashcard(b.flashcards, m.Chat.ID, b.output, b.input[m.Chat.ID], b.inactiveInput)
 	})
 
 	b.api.Handle(tba.OnText, func(m *tba.Message) {
@@ -234,7 +286,8 @@ func (b *bot) Run() {
 	b.api.Start()
 }
 
-func NewBot(token string) *bot {
+//NewBot creates new bot instance under given telegram api token
+func NewBot(token string) *Bot {
 
 	tb, err := tba.NewBot(tba.Settings{
 
@@ -268,5 +321,5 @@ func NewBot(token string) *bot {
 	output := make(chan msg)
 
 	log.Printf("Bot authorized")
-	return &bot{tb, flashcards, input, inactiveInput, output}
+	return &Bot{tb, flashcards, input, inactiveInput, output}
 }
