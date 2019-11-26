@@ -125,7 +125,7 @@ func addFlashcard(flashcards map[int64]map[string]map[string]string, chatID int6
 
 	if _, ok := flashcards[chatID][topic][term]; ok {
 
-		out <- msg{chatID, "Fiszka juz istnieje"}
+		out <- msg{chatID, "Fiszka juz istnieje, edytuj za pomoca /edytujfiszke"}
 		state <- chatID
 		return
 	}
@@ -244,6 +244,54 @@ func deleteFlashcard(flashcards map[int64]map[string]map[string]string, chatID i
 	out <- msg{chatID, "Usunieto fiszke"}
 	state <- chatID
 }
+func editFlashcard(flashcards map[int64]map[string]map[string]string, chatID int64, out chan msg, in chan string, state chan int64) {
+
+	topic, err := dialog(out, chatID, "Podaj temat", in)
+	if err != nil {
+		state <- chatID
+		return
+	}
+
+	term, err := dialog(out, chatID, "Podaj pojecie", in)
+	if err != nil {
+		state <- chatID
+		return
+	}
+
+	if _, ok := flashcards[chatID][topic][term]; !ok {
+
+		out <- msg{chatID, "Fiszka nie istnieje"}
+		state <- chatID
+		return
+	}
+
+	definition, err := dialog(out, chatID, "Podaj definicje", in)
+	if err != nil {
+		state <- chatID
+		return
+	}
+
+	flashcards[chatID][topic][term] = definition
+
+	flashcardsJSON, err := json.Marshal(flashcards)
+	if err != nil {
+		log.Print("Could not encode flashcards")
+		out <- msg{chatID, "Wystapil problem, sprobuj pozniej"}
+		state <- chatID
+		return
+	}
+
+	err = ioutil.WriteFile(flashcardsFileName, flashcardsJSON, 0644)
+	if err != nil {
+		log.Print("Could not write flashcards")
+		out <- msg{chatID, "Wystapil problem, sprobuj pozniej"}
+		state <- chatID
+		return
+	}
+
+	out <- msg{chatID, "Edytowano fiszke"}
+	state <- chatID
+}
 
 //Run starts all handlers and listeners for bot
 func (b *Bot) Run() {
@@ -254,7 +302,7 @@ func (b *Bot) Run() {
 
 	b.api.Handle("/version", func(m *tba.Message) {
 
-		b.output <- msg{m.Chat.ID, "version 0.0.5"}
+		b.output <- msg{m.Chat.ID, "version 0.0.6"}
 	})
 
 	//single line commands don't stop routines
@@ -273,6 +321,12 @@ func (b *Bot) Run() {
 
 		b.input[m.Chat.ID] = make(chan string)
 		go deleteFlashcard(b.flashcards, m.Chat.ID, b.output, b.input[m.Chat.ID], b.inactiveInput)
+	})
+
+	b.api.Handle("/edytujfiszke", func(m *tba.Message) {
+
+		b.input[m.Chat.ID] = make(chan string)
+		go editFlashcard(b.flashcards, m.Chat.ID, b.output, b.input[m.Chat.ID], b.inactiveInput)
 	})
 
 	b.api.Handle(tba.OnText, func(m *tba.Message) {
