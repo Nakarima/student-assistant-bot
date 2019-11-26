@@ -14,10 +14,11 @@ import (
 )
 
 type bot struct {
-	api        *tba.Bot
-	flashcards map[int64]map[string]map[string]string
-	input      map[int64]chan string
-	output     chan msg
+	api           *tba.Bot
+	flashcards    map[int64]map[string]map[string]string
+	input         map[int64]chan string
+	inactiveInput chan int64
+	output        chan msg
 }
 
 type msg struct {
@@ -54,6 +55,16 @@ func output(b *bot) {
 	}
 }
 
+func inputKiller(c chan int64, m map[int64]chan string) {
+	for {
+
+		select {
+
+		case id := <-c:
+			delete(m, id)
+		}
+	}
+}
 func SendMessage(b *bot, chat int64, message string, sendOpt *tba.SendOptions) {
 
 	tmpChat := tba.Chat{ID: chat, Title: "", FirstName: "", LastName: "", Type: "", Username: ""}
@@ -67,7 +78,7 @@ func SendMessage(b *bot, chat int64, message string, sendOpt *tba.SendOptions) {
 func getAnswer(in chan string) (string, error) {
 
 	timeout := 0
-	for timeout < 1200 {
+	for timeout < 12 {
 
 		select {
 
@@ -87,7 +98,7 @@ func timeout(out chan msg, chatID int64) {
 	out <- msg{chatID, "Przekroczono czas odpowiedzi"}
 }
 
-func addFlashcard(flashcards map[int64]map[string]map[string]string, chatID int64, out chan msg, in chan string) {
+func addFlashcard(flashcards map[int64]map[string]map[string]string, chatID int64, out chan msg, in chan string, state chan int64) {
 
 	out <- msg{chatID, "Podaj temat fiszki"}
 	subject, err := getAnswer(in)
@@ -95,6 +106,7 @@ func addFlashcard(flashcards map[int64]map[string]map[string]string, chatID int6
 	if err != nil {
 
 		timeout(out, chatID)
+		state <- chatID
 		return
 	}
 
@@ -104,11 +116,13 @@ func addFlashcard(flashcards map[int64]map[string]map[string]string, chatID int6
 	if err != nil {
 
 		timeout(out, chatID)
+		state <- chatID
 		return
 	}
 
 	if _, ok := flashcards[chatID][subject][term]; ok {
 		out <- msg{chatID, "Fiszka juz istnieje"}
+		state <- chatID
 		return
 	}
 
@@ -118,6 +132,7 @@ func addFlashcard(flashcards map[int64]map[string]map[string]string, chatID int6
 	if err != nil {
 
 		timeout(out, chatID)
+		state <- chatID
 		return
 	}
 
@@ -138,6 +153,7 @@ func addFlashcard(flashcards map[int64]map[string]map[string]string, chatID int6
 	if err != nil {
 		log.Print("Could not encode flashcards")
 		out <- msg{chatID, "Wystapil problem, sprobuj pozniej"}
+		state <- chatID
 		return
 	}
 
@@ -146,10 +162,12 @@ func addFlashcard(flashcards map[int64]map[string]map[string]string, chatID int6
 	if err != nil {
 		log.Print("Could not write flashcards")
 		out <- msg{chatID, "Wystapil problem, sprobuj pozniej"}
+		state <- chatID
 		return
 	}
 
 	out <- msg{chatID, "Dodano fiszke"}
+	state <- chatID
 }
 
 func findFlashcard(flashcards map[string]map[string]string, m *tba.Message, output chan msg) {
@@ -186,9 +204,11 @@ func (b *bot) Run() {
 
 	go output(b)
 
+	go inputKiller(b.inactiveInput, b.input)
+
 	b.api.Handle("/version", func(m *tba.Message) {
 
-		b.output <- msg{m.Chat.ID, "version 0.0.3"}
+		b.output <- msg{m.Chat.ID, "version 0.0.4"}
 	})
 
 	//single line commands don't stop routines
@@ -200,12 +220,15 @@ func (b *bot) Run() {
 	b.api.Handle("/dodajfiszke", func(m *tba.Message) {
 
 		b.input[m.Chat.ID] = make(chan string)
-		go addFlashcard(b.flashcards, m.Chat.ID, b.output, b.input[m.Chat.ID])
+		go addFlashcard(b.flashcards, m.Chat.ID, b.output, b.input[m.Chat.ID], b.inactiveInput)
 	})
 
 	b.api.Handle(tba.OnText, func(m *tba.Message) {
 
-		b.input[m.Chat.ID] <- m.Text
+		if d, ok := b.input[m.Chat.ID]; ok {
+
+			d <- m.Text
+		}
 	})
 
 	b.api.Start()
@@ -241,8 +264,9 @@ func NewBot(token string) *bot {
 	}
 
 	input := make(map[int64]chan string)
+	inactiveInput := make(chan int64)
 	output := make(chan msg)
 
 	log.Printf("Bot authorized")
-	return &bot{tb, flashcards, input, output}
+	return &bot{tb, flashcards, input, inactiveInput, output}
 }
