@@ -7,6 +7,8 @@ It's simple chatbot that helps students in learning and organizing. You use it i
 
 ## Available functions
 
-* **/dodajfiszke** - starts a dialog with bot to add a new flashcard. He will ask for subject, term and definition. You can have same terms under different subjects.
-* **/fiszka _term_** - bot will give you definition (or definitions) for given term.
+* **/dodajfiszke** - starts a dialog with bot to add a new flashcard. He will ask for topic, term and definition. You can have same terms under different subjects.
+* **/fiszka _term_** - bot will give you definition (or definitions) for given term. 
+* **/edytujfiszke** - starts a dialog with bot to edit an existing flashcard. He will ask for topic, term and if flashcard exists it will ask for new definition.
+* **/usunfiszke** - starts a dialog with bot to delete an existing flashcard. He will ask for topic and term. 
 * **/version** - bot will print his current version.
