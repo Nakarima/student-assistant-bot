@@ -23,8 +23,6 @@ func addFlashcard(fc flashcards, chatID chatid, out chan msg, in chan string, st
 
 	t, err := dialog(out, chatID, "Podaj temat", in)
 	if err != nil {
-
-		// nie jestem pewien czy te logi zostawic
 		chatLogger.Info("Dialog ended unsuccessfully")
 		state <- chatID
 		return

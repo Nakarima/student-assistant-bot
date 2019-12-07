@@ -39,7 +39,6 @@ func defaultSendOpt() *tba.SendOptions {
 
 }
 
-//TODO: logrus with special logging for some minor errors like here
 func ensureDataFileExists(fileName string) error {
 
 	if _, err := os.Stat(fileName); err != nil {
@@ -146,6 +145,12 @@ func (b *Bot) Run() {
 		chatID := chatid(m.Chat.ID)
 		b.input[chatID] = make(chan string)
 		go editFlashcard(b.flashcards, chatID, b.output, b.input[chatID], b.inactiveInput)
+	})
+
+	b.api.Handle("/test", func(m *tba.Message) {
+		chatID := chatid(m.Chat.ID)
+		b.input[chatID] = make(chan string)
+		go knowledgeTest(b.flashcards, chatID, b.output, b.input[chatID], b.inactiveInput)
 	})
 
 	b.api.Handle(tba.OnText, func(m *tba.Message) {
