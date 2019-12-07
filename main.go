@@ -5,6 +5,6 @@ import (
 )
 
 func main() {
-	assistant := NewBot(os.Getenv("telegramBot"))
+	assistant := NewBot(os.Getenv("telegramBot"), "dev")
 	assistant.Run()
 }
