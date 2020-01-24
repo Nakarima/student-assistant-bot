@@ -6,11 +6,47 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+func generateTestFlashcards(fc flashcard, testRange int) flashcard {
+	if testRange > len(fc) {
+		return fc
+	}
+	testFlashcards := make(flashcard)
+	i := 0
+	for term, definition := range fc {
+		if i > testRange {
+			break
+		}
+		testFlashcards[term] = definition
+		i++
+	}
+	return testFlashcards
+}
+
+func askQuestions(fc flashcard, chatID chatid, out chan msg, in chan string, state chan chatid, chatLogger *log.Entry) int {
+
+	correctAnswers := 0
+	for term, definition := range fc {
+		answer, err := dialog(out, chatID, "Co to jest? "+definition, in)
+		if err != nil {
+			chatLogger.Info("Dialog ended unsuccessfully")
+			state <- chatID
+			return 0
+		}
+
+		if answer == term {
+			out <- msg{chatID, "Poprawna odpowiedz"}
+			correctAnswers++
+		} else {
+			out <- msg{chatID, "Bledna odpowiedz, poprawna to: " + term}
+		}
+
+	}
+	return correctAnswers
+}
+
 func knowledgeTest(fc flashcards, chatID chatid, out chan msg, in chan string, state chan chatid) {
 
-	chatLogger := log.WithFields(log.Fields{
-		"chat": chatID,
-	})
+	chatLogger := generateDialogLogger(chatID)
 
 	startMessage := "Test twojej wiedzy. Bede podawal definicje roznych pojec, a ty odpowiedz nazwa pojecia. Na poczatek podaj temat, z ktorego chcesz zostac przepytany."
 
@@ -21,17 +57,16 @@ func knowledgeTest(fc flashcards, chatID chatid, out chan msg, in chan string, s
 		return
 	}
 	top := topic(t)
+	//TODO make inline buttons
 	if _, ok := fc[chatID][top]; !ok {
 		out <- msg{chatID, "Temat nie istnieje"}
 		state <- chatID
 		return
 	}
 
-	testFlashcards := fc[chatID][top]
+	fcTopic := fc[chatID][top]
 
-	flashcardsLength := len(testFlashcards)
-
-	testRangeAnswer, err := dialog(out, chatID, "Podaj ilosc pytan, maksymalna ilosc dla tego tematu: "+strconv.Itoa(flashcardsLength), in)
+	testRangeAnswer, err := dialog(out, chatID, "Podaj ilosc pytan, maksymalna ilosc dla tego tematu: "+strconv.Itoa(len(fcTopic)), in)
 	if err != nil {
 		chatLogger.Info("Dialog ended unsuccessfully")
 		state <- chatID
@@ -39,50 +74,16 @@ func knowledgeTest(fc flashcards, chatID chatid, out chan msg, in chan string, s
 	}
 
 	testRange, err2 := strconv.Atoi(testRangeAnswer)
-	i := 0
-	for err2 != nil && i < 3 {
-		testRangeAnswer, err = dialog(out, chatID, "Musisz podac liczbe", in)
-		if err != nil {
-			chatLogger.Info("Dialog ended unsuccessfully")
-			state <- chatID
-			return
-		}
-		testRange, err2 = strconv.Atoi(testRangeAnswer)
-		i++
-	}
-	if i >= 3 {
+	if err2 != nil {
 		chatLogger.Info("Dialog ended unsuccessfully")
+		out <- msg{chatID, "Musisz podac liczbe"}
 		state <- chatID
 		return
 	}
 
-	if testRange > flashcardsLength {
-		testRange = flashcardsLength
-	}
+	testFlashcards := generateTestFlashcards(fcTopic, testRange)
 
-	i = 0
-	correctAnswers := 0
-	for term, definition := range testFlashcards {
-		if i >= testRange {
-			break
-		}
-
-		answer, err := dialog(out, chatID, "Co to jest? "+definition, in)
-		if err != nil {
-			chatLogger.Info("Dialog ended unsuccessfully")
-			state <- chatID
-			return
-		}
-
-		if answer == term {
-			out <- msg{chatID, "Poprawna odpowiedz"}
-			correctAnswers++
-		} else {
-			out <- msg{chatID, "Bledna odpowiedz, poprawna to: " + term}
-		}
-
-		i++
-	}
+	correctAnswers := askQuestions(testFlashcards, chatID, out, in, state, chatLogger)
 
 	result := "Odpowiedziales poprawnie na " + strconv.Itoa(correctAnswers) + " z " + testRangeAnswer
 

@@ -33,6 +33,20 @@ type msg struct {
 
 const flashcardsFileName = "flashcards.json"
 
+func generateDialogLogger(chatID chatid) *log.Entry {
+	return log.WithFields(log.Fields{
+		"chat": chatID,
+	})
+}
+
+func generateIoLogger(filename string, foo string) *log.Entry {
+
+	return log.WithFields(log.Fields{
+		"file": filename,
+		"func": foo,
+	})
+}
+
 func defaultSendOpt() *tba.SendOptions {
 
 	return &tba.SendOptions{}
