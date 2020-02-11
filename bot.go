@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io/ioutil"
 	"os"
-	"strings"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -14,9 +13,6 @@ import (
 )
 
 type chatid int64
-type topic string
-type flashcard map[string]string
-type flashcards map[chatid]map[topic]flashcard
 
 //Bot struct stores api, data and all necessary channels
 type Bot struct {
@@ -32,7 +28,19 @@ type msg struct {
 	text   string
 }
 
-const flashcardsFileName = "flashcards.json"
+func generateDialogLogger(chatID chatid) *log.Entry {
+	return log.WithFields(log.Fields{
+		"chat": chatID,
+	})
+}
+
+func generateIoLogger(filename string, funcname string) *log.Entry {
+
+	return log.WithFields(log.Fields{
+		"file": filename,
+		"func": funcname,
+	})
+}
 
 func defaultSendOpt() *tba.SendOptions {
 
@@ -40,7 +48,6 @@ func defaultSendOpt() *tba.SendOptions {
 
 }
 
-//TODO: logrus with special logging for some minor errors like here
 func ensureDataFileExists(fileName string) error {
 
 	if _, err := os.Stat(fileName); err != nil {
@@ -67,6 +74,7 @@ func output(b *Bot) {
 func inputKiller(c chan chatid, m map[chatid]chan string) {
 
 	for id := range c {
+		close(m[id])
 		delete(m, id)
 	}
 
@@ -115,228 +123,6 @@ func dialog(out chan msg, chatID chatid, question string, in chan string) (strin
 
 }
 
-func addFlashcard(fc flashcards, chatID chatid, out chan msg, in chan string, state chan chatid) {
-
-	chatLogger := log.WithFields(log.Fields{
-		"chat": chatID,
-	})
-
-	ioLogger := log.WithFields(log.Fields{
-		"file": flashcardsFileName,
-		"func": "addFlashcard",
-	})
-
-	t, err := dialog(out, chatID, "Podaj temat", in)
-	if err != nil {
-
-		// nie jestem pewien czy te logi zostawic
-		chatLogger.Info("Dialog ended unsuccessfully")
-		state <- chatID
-		return
-	}
-	top := topic(t)
-
-	term, err := dialog(out, chatID, "Podaj pojecie", in)
-	if err != nil {
-		chatLogger.Info("Dialog ended unsuccessfully")
-		state <- chatID
-		return
-	}
-
-	if _, ok := fc[chatID][topic(top)][term]; ok {
-		out <- msg{chatID, "Fiszka juz istnieje, edytuj za pomoca /edytujfiszke"}
-		state <- chatID
-		return
-	}
-
-	definition, err := dialog(out, chatID, "Podaj definicje", in)
-	if err != nil {
-		chatLogger.Info("Dialog ended unsuccessfully")
-		state <- chatID
-		return
-	}
-
-	if fc[chatID] == nil {
-		fc[chatID] = make(map[topic]flashcard)
-	}
-
-	if fc[chatID][top] == nil {
-		fc[chatID][top] = make(flashcard)
-	}
-
-	fc[chatID][top][term] = definition
-
-	fcJSON, err := json.Marshal(fc)
-	if err != nil {
-		ioLogger.Error("Could not encode flashcards")
-		out <- msg{chatID, "Wystapil problem, moga wystapic problemy z tym terminem w przyszlosci, skontaktuj sie z administratorem"}
-		state <- chatID
-		return
-	}
-
-	err = ioutil.WriteFile(flashcardsFileName, fcJSON, 0644)
-	if err != nil {
-		ioLogger.Error("Could not write file")
-		out <- msg{chatID, "Wystapil problem, moga wystapic problemy z tym terminem w przyszlosci, skontaktuj sie z administratorem"}
-		state <- chatID
-		return
-	}
-
-	out <- msg{chatID, "Dodano fiszke"}
-	state <- chatID
-
-}
-
-func displayFlashcard(fc flashcards, m *tba.Message, output chan msg) {
-
-	chatID := chatid(m.Chat.ID)
-
-	if m.Text == "/fiszka" {
-		output <- msg{chatID, "Podaj pojecie po spacji"}
-		return
-	}
-
-	term := strings.ReplaceAll(m.Text, "/fiszka ", "")
-	flashcardFound := false
-
-	for top, val := range fc[chatID] {
-		if definition, ok := val[term]; ok {
-			flashcardFound = true
-			output <- msg{
-				chatID,
-				string(top) + ", " + term + " - " + definition,
-			}
-		}
-	}
-
-	if !flashcardFound {
-		output <- msg{chatID, "Nie znaleziono pojecia"}
-	}
-
-}
-
-func deleteFlashcard(fc flashcards, chatID chatid, out chan msg, in chan string, state chan chatid) {
-
-	chatLogger := log.WithFields(log.Fields{
-		"chat": chatID,
-	})
-
-	ioLogger := log.WithFields(log.Fields{
-		"file": flashcardsFileName,
-		"func": "deleteFlashcard",
-	})
-
-	t, err := dialog(out, chatID, "Podaj temat", in)
-	if err != nil {
-		chatLogger.Info("Dialog ended unsuccessfully")
-		state <- chatID
-		return
-	}
-	top := topic(t)
-
-	term, err := dialog(out, chatID, "Podaj pojecie", in)
-	if err != nil {
-		chatLogger.Info("Dialog ended unsuccessfully")
-		state <- chatID
-		return
-	}
-
-	if _, ok := fc[chatID][top][term]; !ok {
-
-		out <- msg{chatID, "Fiszka nie istnieje"}
-		state <- chatID
-		return
-	}
-
-	delete(fc[chatID][top], term)
-
-	if fc[chatID][top] == nil {
-		delete(fc[chatID], top)
-	}
-
-	fcJSON, err := json.Marshal(fc)
-	if err != nil {
-		ioLogger.Error("Could not encode flashcards")
-		out <- msg{chatID, "Wystapil problem, moga wystapic problemy z tym terminem w przyszlosci, skontaktuj sie z administratorem"}
-		state <- chatID
-		return
-	}
-
-	err = ioutil.WriteFile(flashcardsFileName, fcJSON, 0644)
-	if err != nil {
-		ioLogger.Error("Could not write file")
-		out <- msg{chatID, "Wystapil problem, moga wystapic problemy z tym terminem w przyszlosci, skontaktuj sie z administratorem"}
-		state <- chatID
-		return
-	}
-
-	out <- msg{chatID, "Usunieto fiszke"}
-	state <- chatID
-
-}
-
-func editFlashcard(fc flashcards, chatID chatid, out chan msg, in chan string, state chan chatid) {
-
-	chatLogger := log.WithFields(log.Fields{
-		"chat": chatID,
-	})
-
-	ioLogger := log.WithFields(log.Fields{
-		"file": flashcardsFileName,
-		"func": "editFlashcard",
-	})
-
-	t, err := dialog(out, chatID, "Podaj temat", in)
-	if err != nil {
-		chatLogger.Info("Dialog ended unsuccessfully")
-		state <- chatID
-		return
-	}
-	top := topic(t)
-
-	term, err := dialog(out, chatID, "Podaj pojecie", in)
-	if err != nil {
-		chatLogger.Info("Dialog ended unsuccessfully")
-		state <- chatID
-		return
-	}
-
-	if _, ok := fc[chatID][top][term]; !ok {
-		out <- msg{chatID, "Fiszka nie istnieje"}
-		state <- chatID
-		return
-	}
-
-	definition, err := dialog(out, chatID, "Podaj definicje", in)
-	if err != nil {
-		chatLogger.Info("Dialog ended unsuccessfully")
-		state <- chatID
-		return
-	}
-
-	fc[chatID][top][term] = definition
-
-	fcJSON, err := json.Marshal(fc)
-	if err != nil {
-		ioLogger.Error("Could not encode flashcards")
-		out <- msg{chatID, "Wystapil problem, moga wystapic problemy z tym terminem w przyszlosci, skontaktuj sie z administratorem"}
-		state <- chatID
-		return
-	}
-
-	err = ioutil.WriteFile(flashcardsFileName, fcJSON, 0644)
-	if err != nil {
-		ioLogger.Error("Could not write file")
-		out <- msg{chatID, "Wystapil problem, moga wystapic problemy z tym terminem w przyszlosci, skontaktuj sie z administratorem"}
-		state <- chatID
-		return
-	}
-
-	out <- msg{chatID, "Edytowano fiszke"}
-	state <- chatID
-
-}
-
 //Run starts all handlers and listeners for bot
 func (b *Bot) Run() {
 
@@ -369,6 +155,12 @@ func (b *Bot) Run() {
 		chatID := chatid(m.Chat.ID)
 		b.input[chatID] = make(chan string)
 		go editFlashcard(b.flashcards, chatID, b.output, b.input[chatID], b.inactiveInput)
+	})
+
+	b.api.Handle("/test", func(m *tba.Message) {
+		chatID := chatid(m.Chat.ID)
+		b.input[chatID] = make(chan string)
+		go knowledgeTest(b.flashcards, chatID, b.output, b.input[chatID], b.inactiveInput)
 	})
 
 	b.api.Handle(tba.OnText, func(m *tba.Message) {
