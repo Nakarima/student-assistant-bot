@@ -13,9 +13,6 @@ import (
 )
 
 type chatid int64
-type topic string
-type flashcard map[string]string
-type flashcards map[chatid]map[topic]flashcard
 
 //Bot struct stores api, data and all necessary channels
 type Bot struct {
@@ -31,19 +28,17 @@ type msg struct {
 	text   string
 }
 
-const flashcardsFileName = "flashcards.json"
-
 func generateDialogLogger(chatID chatid) *log.Entry {
 	return log.WithFields(log.Fields{
 		"chat": chatID,
 	})
 }
 
-func generateIoLogger(filename string, foo string) *log.Entry {
+func generateIoLogger(filename string, funcname string) *log.Entry {
 
 	return log.WithFields(log.Fields{
 		"file": filename,
-		"func": foo,
+		"func": funcname,
 	})
 }
 
@@ -79,6 +74,7 @@ func output(b *Bot) {
 func inputKiller(c chan chatid, m map[chatid]chan string) {
 
 	for id := range c {
+		close(m[id])
 		delete(m, id)
 	}
 

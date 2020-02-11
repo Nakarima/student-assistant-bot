@@ -6,8 +6,9 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+// returns flashcards in given range or if range is equal or higher than number of flashcards returns all
 func generateTestFlashcards(fc flashcard, testRange int) flashcard {
-	if testRange > len(fc) {
+	if testRange >= len(fc) {
 		return fc
 	}
 	testFlashcards := make(flashcard)
@@ -22,7 +23,7 @@ func generateTestFlashcards(fc flashcard, testRange int) flashcard {
 	return testFlashcards
 }
 
-func askQuestions(fc flashcard, chatID chatid, out chan msg, in chan string, state chan chatid, chatLogger *log.Entry) int {
+func askQuestions(fc flashcard, chatID chatid, out chan msg, in chan string, state chan chatid, chatLogger *log.Entry) (int, error) {
 
 	correctAnswers := 0
 	for term, definition := range fc {
@@ -30,7 +31,7 @@ func askQuestions(fc flashcard, chatID chatid, out chan msg, in chan string, sta
 		if err != nil {
 			chatLogger.Info("Dialog ended unsuccessfully")
 			state <- chatID
-			return 0
+			return 0, err
 		}
 
 		if answer == term {
@@ -41,7 +42,7 @@ func askQuestions(fc flashcard, chatID chatid, out chan msg, in chan string, sta
 		}
 
 	}
-	return correctAnswers
+	return correctAnswers, nil
 }
 
 func knowledgeTest(fc flashcards, chatID chatid, out chan msg, in chan string, state chan chatid) {
@@ -73,8 +74,8 @@ func knowledgeTest(fc flashcards, chatID chatid, out chan msg, in chan string, s
 		return
 	}
 
-	testRange, err2 := strconv.Atoi(testRangeAnswer)
-	if err2 != nil {
+	testRange, err := strconv.Atoi(testRangeAnswer)
+	if err != nil {
 		chatLogger.Info("Dialog ended unsuccessfully")
 		out <- msg{chatID, "Musisz podac liczbe"}
 		state <- chatID
@@ -83,7 +84,10 @@ func knowledgeTest(fc flashcards, chatID chatid, out chan msg, in chan string, s
 
 	testFlashcards := generateTestFlashcards(fcTopic, testRange)
 
-	correctAnswers := askQuestions(testFlashcards, chatID, out, in, state, chatLogger)
+	correctAnswers, err := askQuestions(testFlashcards, chatID, out, in, state, chatLogger)
+	if err != nil {
+		return
+	}
 
 	result := "Odpowiedziales poprawnie na " + strconv.Itoa(correctAnswers) + " z " + testRangeAnswer
 

@@ -10,6 +10,12 @@ import (
 	tba "gopkg.in/tucnak/telebot.v2" //telegram bot api
 )
 
+const flashcardsFileName = "flashcards.json"
+
+type topic string
+type flashcard map[string]string
+type flashcards map[chatid]map[topic]flashcard
+
 func writeFlashcards(fc flashcards, ioLogger *log.Entry) error {
 	fcJSON, err := json.Marshal(fc)
 	if err != nil {
@@ -91,29 +97,30 @@ func displayFlashcard(fc flashcards, m *tba.Message, output chan msg) {
 	}
 
 	term := strings.ReplaceAll(m.Text, "/fiszka ", "")
-	flashcardFound := false
+	answer := ""
 
 	for top, val := range fc[chatID] {
 		if definition, ok := val[term]; ok {
-			flashcardFound = true
-			output <- msg{
-				chatID,
-				string(top) + ", " + term + " - " + definition,
-			}
+			answer = answer + "\n" + string(top) + ", " + term + " - " + definition
 		}
 	}
 
-	if !flashcardFound {
-		output <- msg{chatID, "Nie znaleziono pojecia"}
+	if answer != "" {
+		output <- msg{
+			chatID,
+			answer,
+		}
+		return
 	}
 
+	output <- msg{chatID, "Nie znaleziono pojecia"}
 }
 
 func deleteFlashcard(fc flashcards, chatID chatid, out chan msg, in chan string, state chan chatid) {
 
 	chatLogger := generateDialogLogger(chatID)
 
-	ioLogger := generateIoLogger(flashcardsFileName, "addFlashcard")
+	ioLogger := generateIoLogger(flashcardsFileName, "deleteFlashcard")
 
 	t, err := dialog(out, chatID, "Podaj temat", in)
 	if err != nil {
@@ -158,7 +165,7 @@ func editFlashcard(fc flashcards, chatID chatid, out chan msg, in chan string, s
 
 	chatLogger := generateDialogLogger(chatID)
 
-	ioLogger := generateIoLogger(flashcardsFileName, "addFlashcard")
+	ioLogger := generateIoLogger(flashcardsFileName, "editFlashcard")
 
 	t, err := dialog(out, chatID, "Podaj temat", in)
 	if err != nil {
