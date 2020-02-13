@@ -104,8 +104,11 @@ func getAnswer(in chan string) (string, error) {
 
 	select {
 	case a := <-in:
+		if a == "" {
+			return a, errors.New("ended dialog")
+		}
 		return a, nil
-	case <-time.After(10 * time.Minute):
+	case <-time.After(10 * time.Second):
 		return "", errors.New("timeout")
 	}
 
@@ -117,6 +120,9 @@ func dialog(out chan msg, chatID chatid, question string, in chan string) (strin
 	a, err := getAnswer(in)
 
 	if err != nil {
+		if err.Error() == "ended dialog" {
+			return a, err
+		}
 		log.WithFields(log.Fields{
 			"chat": chatID,
 		}).Info("User did not answer in given time")
@@ -133,7 +139,6 @@ func (b *Bot) Run() {
 	go output(b)
 
 	go inputKiller(b.inactiveInput, b.input)
-
 	b.api.Handle("/version", func(m *tba.Message) {
 		b.output <- msg{chatid(m.Chat.ID), "version 0.0.6"}
 	})
@@ -145,24 +150,44 @@ func (b *Bot) Run() {
 
 	b.api.Handle("/dodajfiszke", func(m *tba.Message) {
 		chatID := chatid(m.Chat.ID)
+		if _, ok := b.input[chatID]; ok {
+			b.input[chatID] <- ""
+			time.Sleep(2 * time.Second)
+			delete(b.input, chatID)
+		}
 		b.input[chatID] = make(chan string)
 		go addFlashcard(b.flashcards, chatID, b.output, b.input[chatID], b.inactiveInput)
 	})
 
 	b.api.Handle("/usunfiszke", func(m *tba.Message) {
 		chatID := chatid(m.Chat.ID)
+		if _, ok := b.input[chatID]; ok {
+			b.input[chatID] <- ""
+			time.Sleep(2 * time.Second)
+			delete(b.input, chatID)
+		}
 		b.input[chatID] = make(chan string)
 		go deleteFlashcard(b.flashcards, chatID, b.output, b.input[chatID], b.inactiveInput)
 	})
 
 	b.api.Handle("/edytujfiszke", func(m *tba.Message) {
 		chatID := chatid(m.Chat.ID)
+		if _, ok := b.input[chatID]; ok {
+			b.input[chatID] <- ""
+			time.Sleep(2 * time.Second)
+			delete(b.input, chatID)
+		}
 		b.input[chatID] = make(chan string)
 		go editFlashcard(b.flashcards, chatID, b.output, b.input[chatID], b.inactiveInput)
 	})
 
 	b.api.Handle("/test", func(m *tba.Message) {
 		chatID := chatid(m.Chat.ID)
+		if _, ok := b.input[chatID]; ok {
+			b.input[chatID] <- ""
+			time.Sleep(2 * time.Second)
+			delete(b.input, chatID)
+		}
 		b.input[chatID] = make(chan string)
 		go knowledgeTest(b.flashcards, chatID, b.output, b.input[chatID], b.inactiveInput)
 	})
