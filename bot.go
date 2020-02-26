@@ -152,8 +152,8 @@ func (b *Bot) Run() {
 		chatID := chatid(m.Chat.ID)
 		if _, ok := b.input[chatID]; ok {
 			b.input[chatID] <- ""
+			//TODO: make it without sleep
 			time.Sleep(2 * time.Second)
-			delete(b.input, chatID)
 		}
 		b.input[chatID] = make(chan string)
 		go addFlashcard(b.flashcards, chatID, b.output, b.input[chatID], b.inactiveInput)
@@ -164,7 +164,6 @@ func (b *Bot) Run() {
 		if _, ok := b.input[chatID]; ok {
 			b.input[chatID] <- ""
 			time.Sleep(2 * time.Second)
-			delete(b.input, chatID)
 		}
 		b.input[chatID] = make(chan string)
 		go deleteFlashcard(b.flashcards, chatID, b.output, b.input[chatID], b.inactiveInput)
@@ -175,7 +174,6 @@ func (b *Bot) Run() {
 		if _, ok := b.input[chatID]; ok {
 			b.input[chatID] <- ""
 			time.Sleep(2 * time.Second)
-			delete(b.input, chatID)
 		}
 		b.input[chatID] = make(chan string)
 		go editFlashcard(b.flashcards, chatID, b.output, b.input[chatID], b.inactiveInput)
@@ -186,7 +184,6 @@ func (b *Bot) Run() {
 		if _, ok := b.input[chatID]; ok {
 			b.input[chatID] <- ""
 			time.Sleep(2 * time.Second)
-			delete(b.input, chatID)
 		}
 		b.input[chatID] = make(chan string)
 		go knowledgeTest(b.flashcards, chatID, b.output, b.input[chatID], b.inactiveInput)
