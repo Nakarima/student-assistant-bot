@@ -108,7 +108,7 @@ func getAnswer(in chan string) (string, error) {
 			return a, errors.New("ended dialog")
 		}
 		return a, nil
-	case <-time.After(10 * time.Second):
+	case <-time.After(10 * time.Minute):
 		return "", errors.New("timeout")
 	}
 
