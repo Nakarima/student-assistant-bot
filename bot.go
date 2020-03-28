@@ -18,6 +18,7 @@ type chatid int64
 type Bot struct {
 	api           *tba.Bot
 	flashcards    flashcards
+	//reminders			reminders
 	input         map[chatid]chan string
 	inactiveInput chan chatid
 	output        chan msg
