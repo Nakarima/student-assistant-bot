@@ -12,6 +12,17 @@ import (
 	tba "gopkg.in/tucnak/telebot.v2" //telegram bot api
 )
 
+const funcs = `
+/version - podaje aktualną wersje
+/fiszka {nazwa} - podaje fiszke pod podaną nazwą
+/dodajfiszke - uruchamia dialog dodawania fiszki
+/usunfiszke - uruchamia dialog usuwania fiszki
+/edytujfiszke - uruchamia dialog edytowania fiszki
+/test -  uruchamia test wiedzy
+/dodajprzypomnienie - uruchamia dialog dodawania przypomnienia
+/pokazprzypomnienia - wypisuje listę aktualnych przypomnień
+`
+
 type chatid int64
 
 //Bot struct stores api, data and all necessary channels
@@ -127,7 +138,10 @@ func dialog(out chan msg, chatID chatid, question string, in chan string) (strin
 	}
 
 	return a, err
+}
 
+func help(out chan msg, chatID chatid) {
+	out <- msg{chatID, funcs}
 }
 
 //Run starts all handlers and listeners for bot
@@ -139,6 +153,10 @@ func (b *Bot) Run() {
 
 	b.api.Handle("/version", func(m *tba.Message) {
 		b.output <- msg{chatid(m.Chat.ID), "version 0.0.7"}
+	})
+
+	b.api.Handle("/help", func(m *tba.Message) {
+		go help(b.output, chatid(m.Chat.ID))
 	})
 
 	//single line commands don't stop routines
