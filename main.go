@@ -1,10 +1,6 @@
 package main
 
-import (
-	"os"
-)
-
 func main() {
-	assistant := NewBot(os.Getenv("telegramBot"), "dev")
+	assistant := NewBot("656993470:AAFzs6Yo5g8Uit-qcvtrzexp2OPlNfjHvZI", "dev")
 	assistant.Run()
 }

@@ -32,9 +32,7 @@ func writeFlashcards(fc flashcards, ioLogger *log.Entry) error {
 }
 
 func addFlashcard(fc flashcards, chatID chatid, out chan msg, in chan string, state chan chatid) {
-
 	chatLogger := generateDialogLogger(chatID)
-
 	ioLogger := generateIoLogger(flashcardsFileName, "addFlashcard")
 
 	t, err := dialog(out, chatID, "Podaj temat", in)
@@ -78,14 +76,13 @@ func addFlashcard(fc flashcards, chatID chatid, out chan msg, in chan string, st
 
 	err = writeFlashcards(fc, ioLogger)
 	if err != nil {
-	out <- msg{chatID, "Wystapil problem, moga wystapic problemy z tym terminem w przyszlosci, skontaktuj sie z administratorem"}
+		out <- msg{chatID, "Wystapil problem, moga wystapic problemy z tym terminem w przyszlosci, skontaktuj sie z administratorem"}
 		state <- chatID
 		return
 	}
 
 	out <- msg{chatID, "Dodano fiszke"}
 	state <- chatID
-
 }
 
 func displayFlashcard(fc flashcards, m *tba.Message, output chan msg) {
