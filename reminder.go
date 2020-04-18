@@ -96,33 +96,30 @@ func setReminders(reminders reminders, out chan msg) {
 	writeReminders(reminders, ioLogger)
 }
 
-func addReminder(rd reminders, chatID chatid, out chan msg, in chan string, state chan chatid) {
+func addReminder(rd reminders, chatID chatid, out chan msg, in chan string, endDialog chan chatid) {
 	chatLogger := generateDialogLogger(chatID)
-
 	ioLogger := generateIoLogger(remindersFileName, "addReminder")
+	defer func() { endDialog <- chatID }()
+
 	d, err := dialog(out, chatID, "Podaj date w formacie DD-MM-RR HH:MM", in)
 	if err != nil {
 		chatLogger.Info("Dialog ended unsuccessfully")
-		state <- chatID
 		return
 	}
 	date, err := time.Parse(dateLayout, d)
 	if err != nil {
 		out <- msg{chatID, "Niepoprawna format daty"}
-		state <- chatID
 		return
 	}
 
 	if date.Before(time.Now().Add(2*time.Hour)) {
 		out <- msg{chatID, "Data jest z przeszłości, spróbuj ponownie"}
-		state <- chatID
 		return
 	}
 
 	t, err := dialog(out, chatID, "Podaj tytuł przypomnienia", in)
 	if err != nil {
 		chatLogger.Info("Dialog ended unsuccessfully")
-		state <- chatID
 		return
 	}
 
@@ -138,10 +135,9 @@ func addReminder(rd reminders, chatID chatid, out chan msg, in chan string, stat
 	err = writeReminders(rd, ioLogger)
 	if err != nil {
 		out <- msg{chatID, "Wystapil problem, moga wystapic problemy z tym przypomnieniem w przyszlosci, skontaktuj sie z administratorem"}
-		state <- chatID
 		return
 	}
 
 	out <- msg{chatID, "Dodano przypomnienie"}
-	state <- chatID
+	return
 }
