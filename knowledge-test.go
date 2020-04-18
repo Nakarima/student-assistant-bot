@@ -2,7 +2,7 @@ package main
 
 import (
 	"strconv"
-
+	"strings"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -33,12 +33,12 @@ func askQuestions(fc flashcard, chatID chatid, out chan msg, in chan string, sta
 			state <- chatID
 			return 0, err
 		}
-
+		answer = strings.ToLower(answer)
 		if answer == term {
 			out <- msg{chatID, "Poprawna odpowiedz"}
 			correctAnswers++
 		} else {
-			out <- msg{chatID, "Bledna odpowiedz, poprawna to: " + term}
+			out <- msg{chatID, "Bledna odpowiedz, poprawna to: " + strings.Title(term)}
 		}
 
 	}
@@ -57,6 +57,7 @@ func knowledgeTest(fc flashcards, chatID chatid, out chan msg, in chan string, s
 		state <- chatID
 		return
 	}
+	t = strings.ToLower(t)
 	top := topic(t)
 	//TODO make inline buttons
 	if _, ok := fc[chatID][top]; !ok {

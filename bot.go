@@ -12,12 +12,24 @@ import (
 	tba "gopkg.in/tucnak/telebot.v2" //telegram bot api
 )
 
+const funcs = `
+/version - podaje aktualną wersje
+/fiszka {nazwa} - podaje fiszke pod podaną nazwą
+/dodajfiszke - uruchamia dialog dodawania fiszki
+/usunfiszke - uruchamia dialog usuwania fiszki
+/edytujfiszke - uruchamia dialog edytowania fiszki
+/test -  uruchamia test wiedzy
+/dodajprzypomnienie - uruchamia dialog dodawania przypomnienia
+/pokazprzypomnienia - wypisuje listę aktualnych przypomnień
+`
+
 type chatid int64
 
 //Bot struct stores api, data and all necessary channels
 type Bot struct {
 	api           *tba.Bot
 	flashcards    flashcards
+	reminders			reminders
 	input         map[chatid]chan string
 	inactiveInput chan chatid
 	output        chan msg
@@ -126,17 +138,25 @@ func dialog(out chan msg, chatID chatid, question string, in chan string) (strin
 	}
 
 	return a, err
+}
 
+func help(out chan msg, chatID chatid) {
+	out <- msg{chatID, funcs}
 }
 
 //Run starts all handlers and listeners for bot
 func (b *Bot) Run() {
 
 	go output(b)
-
 	go inputKiller(b.inactiveInput, b.input)
+	go setReminders(b.reminders, b.output)
+
 	b.api.Handle("/version", func(m *tba.Message) {
-		b.output <- msg{chatid(m.Chat.ID), "version 0.0.6"}
+		b.output <- msg{chatid(m.Chat.ID), "version 0.0.7"}
+	})
+
+	b.api.Handle("/help", func(m *tba.Message) {
+		go help(b.output, chatid(m.Chat.ID))
 	})
 
 	//single line commands don't stop routines
@@ -183,6 +203,22 @@ func (b *Bot) Run() {
 		}
 		b.input[chatID] = make(chan string)
 		go knowledgeTest(b.flashcards, chatID, b.output, b.input[chatID], b.inactiveInput)
+	})
+
+	b.api.Handle("/dodajprzypomnienie", func(m *tba.Message) {
+		chatID := chatid(m.Chat.ID)
+		if _, ok := b.input[chatID]; ok {
+			b.input[chatID] <- ""
+			time.Sleep(2 * time.Second)
+		}
+		b.input[chatID] = make(chan string)
+		go addReminder(b.reminders, chatID, b.output, b.input[chatID], b.inactiveInput)
+	})
+
+	b.api.Handle("/pokazprzypomnienia", func(m *tba.Message) {
+		chatID := chatid(m.Chat.ID)
+
+		go showReminders(b.reminders, chatID, b.output)
 	})
 
 	b.api.Handle(tba.OnText, func(m *tba.Message) {
@@ -235,11 +271,29 @@ func NewBot(token string, env string) *Bot {
 		}).Fatal("Could not decode file")
 	}
 
+	reminders := make(reminders)
+	_ = ensureDataFileExists(remindersFileName)
+	remindersData, err := ioutil.ReadFile(remindersFileName)
+
+	if err != nil {
+		log.WithFields(log.Fields{
+			"file": remindersFileName,
+		}).Fatal("Could not read file")
+	}
+
+	err = json.Unmarshal([]byte(remindersData), &reminders)
+
+	if err != nil {
+		log.WithFields(log.Fields{
+			"file": remindersFileName,
+		}).Fatal("Could not decode file")
+	}
+
 	input := make(map[chatid]chan string)
 	inactiveInput := make(chan chatid)
 	output := make(chan msg)
 
 	log.Info("Bot authorized")
-	return &Bot{tb, flashcards, input, inactiveInput, output}
+	return &Bot{tb, flashcards, reminders, input, inactiveInput, output}
 
 }

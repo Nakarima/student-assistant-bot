@@ -32,9 +32,7 @@ func writeFlashcards(fc flashcards, ioLogger *log.Entry) error {
 }
 
 func addFlashcard(fc flashcards, chatID chatid, out chan msg, in chan string, state chan chatid) {
-
 	chatLogger := generateDialogLogger(chatID)
-
 	ioLogger := generateIoLogger(flashcardsFileName, "addFlashcard")
 
 	t, err := dialog(out, chatID, "Podaj temat", in)
@@ -43,6 +41,7 @@ func addFlashcard(fc flashcards, chatID chatid, out chan msg, in chan string, st
 		state <- chatID
 		return
 	}
+	t = strings.ToLower(t)
 	top := topic(t)
 
 	term, err := dialog(out, chatID, "Podaj pojecie", in)
@@ -51,7 +50,7 @@ func addFlashcard(fc flashcards, chatID chatid, out chan msg, in chan string, st
 		state <- chatID
 		return
 	}
-
+	term = strings.ToLower(term)
 	if _, ok := fc[chatID][top][term]; ok {
 		out <- msg{chatID, "Fiszka juz istnieje, edytuj za pomoca /edytujfiszke"}
 		state <- chatID
@@ -84,7 +83,6 @@ func addFlashcard(fc flashcards, chatID chatid, out chan msg, in chan string, st
 
 	out <- msg{chatID, "Dodano fiszke"}
 	state <- chatID
-
 }
 
 func displayFlashcard(fc flashcards, m *tba.Message, output chan msg) {
@@ -100,8 +98,8 @@ func displayFlashcard(fc flashcards, m *tba.Message, output chan msg) {
 	answer := ""
 
 	for top, val := range fc[chatID] {
-		if definition, ok := val[term]; ok {
-			answer = answer + "\n" + string(top) + ", " + term + " - " + definition
+		if definition, ok := val[strings.ToLower(term)]; ok {
+			answer = answer + "\n" + strings.Title(string(top)) + ", " + strings.Title(term) + " - " + definition
 		}
 	}
 
@@ -128,6 +126,7 @@ func deleteFlashcard(fc flashcards, chatID chatid, out chan msg, in chan string,
 		state <- chatID
 		return
 	}
+	t = strings.ToLower(t)
 	top := topic(t)
 
 	term, err := dialog(out, chatID, "Podaj pojecie", in)
@@ -136,7 +135,7 @@ func deleteFlashcard(fc flashcards, chatID chatid, out chan msg, in chan string,
 		state <- chatID
 		return
 	}
-
+	term = strings.ToLower(term)
 	if _, ok := fc[chatID][top][term]; !ok {
 
 		out <- msg{chatID, "Fiszka nie istnieje"}
@@ -173,6 +172,7 @@ func editFlashcard(fc flashcards, chatID chatid, out chan msg, in chan string, s
 		state <- chatID
 		return
 	}
+	t = strings.ToLower(t)
 	top := topic(t)
 
 	term, err := dialog(out, chatID, "Podaj pojecie", in)
@@ -181,7 +181,7 @@ func editFlashcard(fc flashcards, chatID chatid, out chan msg, in chan string, s
 		state <- chatID
 		return
 	}
-
+	term = strings.ToLower(term)
 	if _, ok := fc[chatID][top][term]; !ok {
 		out <- msg{chatID, "Fiszka nie istnieje"}
 		state <- chatID
