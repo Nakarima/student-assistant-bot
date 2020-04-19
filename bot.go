@@ -25,43 +25,48 @@ const funcs = `
 
 type chatid int64
 
-//Bot struct stores api, data and all necessary channels
+// Bot struct stores api, data and all necessary channels.
+// FlashcardsData stores all flashcards by chat ID.
+// RemindersData stores all reminders by chat ID.
+// Input is a channel for managing all messages from chats.
+// InactiveInput is a channel that informs bot about exiting dialogs so he can make it available for other dialog.
+// Output is a channel for sending message to chats.
 type Bot struct {
 	api            *tba.Bot
-	flashcardsData flashcardsData
-	remindersData  remindersData
-	input          map[chatid]chan string
-	inactiveInput  chan chatid
-	output         chan msg
+	FlashcardsData flashcardsData
+	RemindersData  remindersData
+	Input          map[chatid]chan string
+	InactiveInput  chan chatid
+	Output         chan Msg
 }
 
-type msg struct {
+// Msg is basic message struct. It stores desired chat ID and text message.
+type Msg struct {
 	chatID chatid
 	text   string
 }
 
+// generateDialogLogger creates logger for dialog errors
 func generateDialogLogger(chatID chatid) *log.Entry {
 	return log.WithFields(log.Fields{
 		"chat": chatID,
 	})
 }
 
+// generateIoLogger creates logger for any file related errors.
 func generateIoLogger(filename string, funcname string) *log.Entry {
-
 	return log.WithFields(log.Fields{
 		"file": filename,
 		"func": funcname,
 	})
 }
 
+// defaultSendOpt stores default config for sending messages to chat.
 func defaultSendOpt() *tba.SendOptions {
-
 	return &tba.SendOptions{}
-
 }
 
 func ensureDataFileExists(fileName string) error {
-
 	if _, err := os.Stat(fileName); err != nil {
 		err = ioutil.WriteFile(fileName, []byte("{}"), 0644)
 		if err != nil {
@@ -75,25 +80,23 @@ func ensureDataFileExists(fileName string) error {
 
 }
 
-func (b *Bot) handleOutput() {
-
-	for m := range b.output {
-		_ = b.sendMessage(m.chatID, m.text, defaultSendOpt())
+// HandleOutput listens for messages on Output channel and sends them to desired chat.
+func (b *Bot) HandleOutput() {
+	for m := range b.Output {
+		_ = b.SendMessage(m.chatID, m.text, defaultSendOpt())
 	}
-
 }
 
-func (b *Bot) inputKiller() {
-
-	for id := range b.inactiveInput {
-		close(b.input[id])
-		delete(b.input, id)
+// InputKiller listens for chat IDs on InactiveInput channel and then deletes desired Input channel.
+func (b *Bot) InputKiller() {
+	for id := range b.InactiveInput {
+		close(b.Input[id])
+		delete(b.Input, id)
 	}
-
 }
 
-func (b *Bot) sendMessage(chat chatid, message string, sendOpt *tba.SendOptions) error {
-
+// SendMessage creates messages specific for telegram api and then sends them to desired chat. It wraps chatid to chat object, because it is requirment for tucnak's package.
+func (b *Bot) SendMessage(chat chatid, message string, sendOpt *tba.SendOptions) error {
 	tmpChat := tba.Chat{ID: int64(chat), Title: "", FirstName: "", LastName: "", Type: "", Username: ""}
 	_, err := b.api.Send(&tmpChat, message, sendOpt)
 
@@ -105,11 +108,10 @@ func (b *Bot) sendMessage(chat chatid, message string, sendOpt *tba.SendOptions)
 	}
 
 	return err
-
 }
 
+// getAnswer listens for users message and returns it. If user doesn't respond in given time it returns error. If input is empty string it will return error. It's good for ending opened dialog when we want to start a new one.
 func getAnswer(in chan string) (string, error) {
-
 	select {
 	case a := <-in:
 		if a == "" {
@@ -119,13 +121,12 @@ func getAnswer(in chan string) (string, error) {
 	case <-time.After(10 * time.Minute):
 		return "", errors.New("timeout")
 	}
-
 }
 
-func (b *Bot) dialog(chatID chatid, question string) (string, error) {
-
-	b.output <- msg{chatID, question}
-	a, err := getAnswer(b.input[chatID])
+// Dialog handles basic user-bot interaction. Bot will ask given question, and then listen for user's answer. If everything is correct it will return answer.
+func (b *Bot) Dialog(chatID chatid, question string) (string, error) {
+	b.Output <- Msg{chatID, question}
+	a, err := getAnswer(b.Input[chatID])
 
 	if err != nil {
 		if err.Error() == "ended dialog" {
@@ -134,95 +135,96 @@ func (b *Bot) dialog(chatID chatid, question string) (string, error) {
 		log.WithFields(log.Fields{
 			"chat": chatID,
 		}).Info("User did not answer in given time")
-		b.output <- msg{chatID, "Przekroczono czas odpowiedzi"}
+		b.Output <- Msg{chatID, "Przekroczono czas odpowiedzi"}
 	}
 
 	return a, err
 }
 
-func (b *Bot) help(chatID chatid) {
-	b.output <- msg{chatID, funcs}
+// Help sends to user list of available commands
+func (b *Bot) Help(chatID chatid) {
+	b.Output <- Msg{chatID, funcs}
 }
 
 //Run starts all handlers and listeners for bot
 func (b *Bot) Run() {
 
-	go b.handleOutput()
-	go b.inputKiller()
-	b.setReminders()
+	go b.HandleOutput()
+	go b.InputKiller()
+	b.SetReminders()
 
 	b.api.Handle("/version", func(m *tba.Message) {
-		b.output <- msg{chatid(m.Chat.ID), "version 0.3.1"}
+		b.Output <- Msg{chatid(m.Chat.ID), "version 0.3.1"}
 	})
 
 	b.api.Handle("/help", func(m *tba.Message) {
-		go b.help(chatid(m.Chat.ID))
+		go b.Help(chatid(m.Chat.ID))
 	})
 
 	//single line commands don't stop routines
 	b.api.Handle("/fiszka", func(m *tba.Message) {
-		b.displayFlashcard(m)
+		b.DisplayFlashcard(m)
 	})
 
 	b.api.Handle("/dodajfiszke", func(m *tba.Message) {
 		chatID := chatid(m.Chat.ID)
-		if _, ok := b.input[chatID]; ok {
-			b.input[chatID] <- ""
+		if _, ok := b.Input[chatID]; ok {
+			b.Input[chatID] <- ""
 			//TODO: make it without sleep
 			time.Sleep(2 * time.Second)
 		}
-		b.input[chatID] = make(chan string)
-		go b.addFlashcard(chatID)
+		b.Input[chatID] = make(chan string)
+		go b.AddFlashcard(chatID)
 	})
 
 	b.api.Handle("/usunfiszke", func(m *tba.Message) {
 		chatID := chatid(m.Chat.ID)
-		if _, ok := b.input[chatID]; ok {
-			b.input[chatID] <- ""
+		if _, ok := b.Input[chatID]; ok {
+			b.Input[chatID] <- ""
 			time.Sleep(2 * time.Second)
 		}
-		b.input[chatID] = make(chan string)
-		go b.deleteFlashcard(chatID)
+		b.Input[chatID] = make(chan string)
+		go b.DeleteFlashcard(chatID)
 	})
 
 	b.api.Handle("/edytujfiszke", func(m *tba.Message) {
 		chatID := chatid(m.Chat.ID)
-		if _, ok := b.input[chatID]; ok {
-			b.input[chatID] <- ""
+		if _, ok := b.Input[chatID]; ok {
+			b.Input[chatID] <- ""
 			time.Sleep(2 * time.Second)
 		}
-		b.input[chatID] = make(chan string)
-		go b.editFlashcard(chatID)
+		b.Input[chatID] = make(chan string)
+		go b.EditFlashcard(chatID)
 	})
 
 	b.api.Handle("/test", func(m *tba.Message) {
 		chatID := chatid(m.Chat.ID)
-		if _, ok := b.input[chatID]; ok {
-			b.input[chatID] <- ""
+		if _, ok := b.Input[chatID]; ok {
+			b.Input[chatID] <- ""
 			time.Sleep(2 * time.Second)
 		}
-		b.input[chatID] = make(chan string)
-		go b.knowledgeTest(chatID)
+		b.Input[chatID] = make(chan string)
+		go b.KnowledgeTest(chatID)
 	})
 
 	b.api.Handle("/dodajprzypomnienie", func(m *tba.Message) {
 		chatID := chatid(m.Chat.ID)
-		if _, ok := b.input[chatID]; ok {
-			b.input[chatID] <- ""
+		if _, ok := b.Input[chatID]; ok {
+			b.Input[chatID] <- ""
 			time.Sleep(2 * time.Second)
 		}
-		b.input[chatID] = make(chan string)
-		go b.addReminder(chatID)
+		b.Input[chatID] = make(chan string)
+		go b.AddReminder(chatID)
 	})
 
 	b.api.Handle("/pokazprzypomnienia", func(m *tba.Message) {
 		chatID := chatid(m.Chat.ID)
 
-		go b.showReminders(chatID)
+		go b.ShowReminders(chatID)
 	})
 
 	b.api.Handle(tba.OnText, func(m *tba.Message) {
-		if d, ok := b.input[chatid(m.Chat.ID)]; ok {
+		if d, ok := b.Input[chatid(m.Chat.ID)]; ok {
 			d <- m.Text
 		}
 	})
@@ -231,7 +233,7 @@ func (b *Bot) Run() {
 
 }
 
-//NewBot creates new bot instance under given telegram api token
+//NewBot creates new bot instance under given telegram api token. If env is prod it will log all errors and info to a file.
 func NewBot(token string, env string) *Bot {
 
 	if env == "prod" {
@@ -291,7 +293,7 @@ func NewBot(token string, env string) *Bot {
 
 	input := make(map[chatid]chan string)
 	inactiveInput := make(chan chatid)
-	output := make(chan msg)
+	output := make(chan Msg)
 
 	log.Info("Bot authorized")
 	return &Bot{tb, flashcards, reminders, input, inactiveInput, output}
