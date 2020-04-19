@@ -13,10 +13,10 @@ import (
 const flashcardsFileName = "flashcards.json"
 
 type topic string
-type flashcard map[string]string
-type flashcards map[chatid]map[topic]flashcard
+type flashcards map[string]string
+type flashcardsData map[chatid]map[topic]flashcards
 
-func writeFlashcards(fc flashcards, ioLogger *log.Entry) error {
+func writeFlashcards(fc flashcardsData, ioLogger *log.Entry) error {
 	fcJSON, err := json.Marshal(fc)
 	if err != nil {
 		ioLogger.Error("Could not encode flashcards")
@@ -31,12 +31,13 @@ func writeFlashcards(fc flashcards, ioLogger *log.Entry) error {
 	return err
 }
 
-func addFlashcard(fc flashcards, chatID chatid, out chan msg, in chan string, endDialog chan chatid) {
+func (b *Bot) addFlashcard(chatID chatid) {
 	chatLogger := generateDialogLogger(chatID)
 	ioLogger := generateIoLogger(flashcardsFileName, "addFlashcard")
-	defer func () { endDialog <- chatID }()
+	defer func() { b.inactiveInput <- chatID }()
+	fc := b.flashcardsData
 
-	t, err := dialog(out, chatID, "Podaj temat", in)
+	t, err := b.dialog(chatID, "Podaj temat")
 	if err != nil {
 		chatLogger.Info("Dialog ended unsuccessfully")
 		return
@@ -44,48 +45,49 @@ func addFlashcard(fc flashcards, chatID chatid, out chan msg, in chan string, en
 	t = strings.ToLower(t)
 	top := topic(t)
 
-	term, err := dialog(out, chatID, "Podaj pojecie", in)
+	term, err := b.dialog(chatID, "Podaj pojecie")
 	if err != nil {
 		chatLogger.Info("Dialog ended unsuccessfully")
 		return
 	}
 	term = strings.ToLower(term)
 	if _, ok := fc[chatID][top][term]; ok {
-		out <- msg{chatID, "Fiszka juz istnieje, edytuj za pomoca /edytujfiszke"}
+		b.output <- msg{chatID, "Fiszka juz istnieje, edytuj za pomoca /edytujfiszke"}
 		return
 	}
 
-	definition, err := dialog(out, chatID, "Podaj definicje", in)
+	definition, err := b.dialog(chatID, "Podaj definicje")
 	if err != nil {
 		chatLogger.Info("Dialog ended unsuccessfully")
 		return
 	}
 
 	if fc[chatID] == nil {
-		fc[chatID] = make(map[topic]flashcard)
+		fc[chatID] = make(map[topic]flashcards)
 	}
 
 	if fc[chatID][top] == nil {
-		fc[chatID][top] = make(flashcard)
+		fc[chatID][top] = make(flashcards)
 	}
 
 	fc[chatID][top][term] = definition
 
 	err = writeFlashcards(fc, ioLogger)
 	if err != nil {
-		out <- msg{chatID, "Wystapil problem, moga wystapic problemy z tym terminem w przyszlosci, skontaktuj sie z administratorem"}
-		return
+		b.output <- msg{chatID, "Wystapil problem, moga wystapic problemy z tym terminem w przyszlosci, skontaktuj sie z administratorem"}
 	}
 
-	out <- msg{chatID, "Dodano fiszke"}
+	b.flashcardsData[chatID] = fc[chatID]
+	b.output <- msg{chatID, "Dodano fiszke"}
 }
 
-func displayFlashcard(fc flashcards, m *tba.Message, output chan msg) {
+func (b *Bot) displayFlashcard(m *tba.Message) {
 
 	chatID := chatid(m.Chat.ID)
+	fc := b.flashcardsData
 
 	if m.Text == "/fiszka" {
-		output <- msg{chatID, "Podaj pojecie po spacji"}
+		b.output <- msg{chatID, "Podaj pojecie po spacji"}
 		return
 	}
 
@@ -99,22 +101,23 @@ func displayFlashcard(fc flashcards, m *tba.Message, output chan msg) {
 	}
 
 	if answer != "" {
-		output <- msg{
+		b.output <- msg{
 			chatID,
 			answer,
 		}
 		return
 	}
 
-	output <- msg{chatID, "Nie znaleziono pojecia"}
+	b.output <- msg{chatID, "Nie znaleziono pojecia"}
 }
 
-func deleteFlashcard(fc flashcards, chatID chatid, out chan msg, in chan string, endDialog chan chatid) {
+func (b *Bot) deleteFlashcard(chatID chatid) {
 	chatLogger := generateDialogLogger(chatID)
 	ioLogger := generateIoLogger(flashcardsFileName, "deleteFlashcard")
-	defer func () { endDialog <- chatID }()
+	defer func() { b.inactiveInput <- chatID }()
+	fc := b.flashcardsData
 
-	t, err := dialog(out, chatID, "Podaj temat", in)
+	t, err := b.dialog(chatID, "Podaj temat")
 	if err != nil {
 		chatLogger.Info("Dialog ended unsuccessfully")
 		return
@@ -122,7 +125,7 @@ func deleteFlashcard(fc flashcards, chatID chatid, out chan msg, in chan string,
 	t = strings.ToLower(t)
 	top := topic(t)
 
-	term, err := dialog(out, chatID, "Podaj pojecie", in)
+	term, err := b.dialog(chatID, "Podaj pojecie")
 	if err != nil {
 		chatLogger.Info("Dialog ended unsuccessfully")
 		return
@@ -130,7 +133,7 @@ func deleteFlashcard(fc flashcards, chatID chatid, out chan msg, in chan string,
 	term = strings.ToLower(term)
 	if _, ok := fc[chatID][top][term]; !ok {
 
-		out <- msg{chatID, "Fiszka nie istnieje"}
+		b.output <- msg{chatID, "Fiszka nie istnieje"}
 		return
 	}
 
@@ -141,19 +144,20 @@ func deleteFlashcard(fc flashcards, chatID chatid, out chan msg, in chan string,
 	}
 	err = writeFlashcards(fc, ioLogger)
 	if err != nil {
-		out <- msg{chatID, "Wystapil problem, moga wystapic problemy z tym terminem w przyszlosci, skontaktuj sie z administratorem"}
-		return
+		b.output <- msg{chatID, "Wystapil problem, moga wystapic problemy z tym terminem w przyszlosci, skontaktuj sie z administratorem"}
 	}
 
-	out <- msg{chatID, "Usunieto fiszke"}
+	b.flashcardsData[chatID] = fc[chatID]
+	b.output <- msg{chatID, "Usunieto fiszke"}
 }
 
-func editFlashcard(fc flashcards, chatID chatid, out chan msg, in chan string, endDialog chan chatid) {
+func (b *Bot) editFlashcard(chatID chatid) {
 	chatLogger := generateDialogLogger(chatID)
 	ioLogger := generateIoLogger(flashcardsFileName, "editFlashcard")
-	defer func () { endDialog <- chatID }()
+	defer func() { b.inactiveInput <- chatID }()
+	fc := b.flashcardsData
 
-	t, err := dialog(out, chatID, "Podaj temat", in)
+	t, err := b.dialog(chatID, "Podaj temat")
 	if err != nil {
 		chatLogger.Info("Dialog ended unsuccessfully")
 		return
@@ -161,18 +165,18 @@ func editFlashcard(fc flashcards, chatID chatid, out chan msg, in chan string, e
 	t = strings.ToLower(t)
 	top := topic(t)
 
-	term, err := dialog(out, chatID, "Podaj pojecie", in)
+	term, err := b.dialog(chatID, "Podaj pojecie")
 	if err != nil {
 		chatLogger.Info("Dialog ended unsuccessfully")
 		return
 	}
 	term = strings.ToLower(term)
 	if _, ok := fc[chatID][top][term]; !ok {
-		out <- msg{chatID, "Fiszka nie istnieje"}
+		b.output <- msg{chatID, "Fiszka nie istnieje"}
 		return
 	}
 
-	definition, err := dialog(out, chatID, "Podaj definicje", in)
+	definition, err := b.dialog(chatID, "Podaj definicje")
 	if err != nil {
 		chatLogger.Info("Dialog ended unsuccessfully")
 		return
@@ -181,9 +185,9 @@ func editFlashcard(fc flashcards, chatID chatid, out chan msg, in chan string, e
 	fc[chatID][top][term] = definition
 	err = writeFlashcards(fc, ioLogger)
 	if err != nil {
-		out <- msg{chatID, "Wystapil problem, moga wystapic problemy z tym terminem w przyszlosci, skontaktuj sie z administratorem"}
-		return
+		b.output <- msg{chatID, "Wystapil problem, moga wystapic problemy z tym terminem w przyszlosci, skontaktuj sie z administratorem"}
 	}
 
-	out <- msg{chatID, "Edytowano fiszke"}
+	b.flashcardsData[chatID] = fc[chatID]
+	b.output <- msg{chatID, "Edytowano fiszke"}
 }

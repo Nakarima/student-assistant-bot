@@ -27,12 +27,12 @@ type chatid int64
 
 //Bot struct stores api, data and all necessary channels
 type Bot struct {
-	api           *tba.Bot
-	flashcards    flashcards
-	reminders			reminders
-	input         map[chatid]chan string
-	inactiveInput chan chatid
-	output        chan msg
+	api            *tba.Bot
+	flashcardsData flashcardsData
+	remindersData  remindersData
+	input          map[chatid]chan string
+	inactiveInput  chan chatid
+	output         chan msg
 }
 
 type msg struct {
@@ -75,24 +75,24 @@ func ensureDataFileExists(fileName string) error {
 
 }
 
-func output(b *Bot) {
+func (b *Bot) handleOutput() {
 
 	for m := range b.output {
-		_ = sendMessage(b, m.chatID, m.text, defaultSendOpt())
+		_ = b.sendMessage(m.chatID, m.text, defaultSendOpt())
 	}
 
 }
 
-func inputKiller(c chan chatid, m map[chatid]chan string) {
+func (b *Bot) inputKiller() {
 
-	for id := range c {
-		close(m[id])
-		delete(m, id)
+	for id := range b.inactiveInput {
+		close(b.input[id])
+		delete(b.input, id)
 	}
 
 }
 
-func sendMessage(b *Bot, chat chatid, message string, sendOpt *tba.SendOptions) error {
+func (b *Bot) sendMessage(chat chatid, message string, sendOpt *tba.SendOptions) error {
 
 	tmpChat := tba.Chat{ID: int64(chat), Title: "", FirstName: "", LastName: "", Type: "", Username: ""}
 	_, err := b.api.Send(&tmpChat, message, sendOpt)
@@ -122,10 +122,10 @@ func getAnswer(in chan string) (string, error) {
 
 }
 
-func dialog(out chan msg, chatID chatid, question string, in chan string) (string, error) {
+func (b *Bot) dialog(chatID chatid, question string) (string, error) {
 
-	out <- msg{chatID, question}
-	a, err := getAnswer(in)
+	b.output <- msg{chatID, question}
+	a, err := getAnswer(b.input[chatID])
 
 	if err != nil {
 		if err.Error() == "ended dialog" {
@@ -134,34 +134,34 @@ func dialog(out chan msg, chatID chatid, question string, in chan string) (strin
 		log.WithFields(log.Fields{
 			"chat": chatID,
 		}).Info("User did not answer in given time")
-		out <- msg{chatID, "Przekroczono czas odpowiedzi"}
+		b.output <- msg{chatID, "Przekroczono czas odpowiedzi"}
 	}
 
 	return a, err
 }
 
-func help(out chan msg, chatID chatid) {
-	out <- msg{chatID, funcs}
+func (b *Bot) help(chatID chatid) {
+	b.output <- msg{chatID, funcs}
 }
 
 //Run starts all handlers and listeners for bot
 func (b *Bot) Run() {
 
-	go output(b)
-	go inputKiller(b.inactiveInput, b.input)
-	go setReminders(b.reminders, b.output)
+	go b.handleOutput()
+	go b.inputKiller()
+	b.setReminders()
 
 	b.api.Handle("/version", func(m *tba.Message) {
-		b.output <- msg{chatid(m.Chat.ID), "version 0.0.7"}
+		b.output <- msg{chatid(m.Chat.ID), "version 0.3.1"}
 	})
 
 	b.api.Handle("/help", func(m *tba.Message) {
-		go help(b.output, chatid(m.Chat.ID))
+		go b.help(chatid(m.Chat.ID))
 	})
 
 	//single line commands don't stop routines
 	b.api.Handle("/fiszka", func(m *tba.Message) {
-		displayFlashcard(b.flashcards, m, b.output)
+		b.displayFlashcard(m)
 	})
 
 	b.api.Handle("/dodajfiszke", func(m *tba.Message) {
@@ -172,7 +172,7 @@ func (b *Bot) Run() {
 			time.Sleep(2 * time.Second)
 		}
 		b.input[chatID] = make(chan string)
-		go addFlashcard(b.flashcards, chatID, b.output, b.input[chatID], b.inactiveInput)
+		go b.addFlashcard(chatID)
 	})
 
 	b.api.Handle("/usunfiszke", func(m *tba.Message) {
@@ -182,7 +182,7 @@ func (b *Bot) Run() {
 			time.Sleep(2 * time.Second)
 		}
 		b.input[chatID] = make(chan string)
-		go deleteFlashcard(b.flashcards, chatID, b.output, b.input[chatID], b.inactiveInput)
+		go b.deleteFlashcard(chatID)
 	})
 
 	b.api.Handle("/edytujfiszke", func(m *tba.Message) {
@@ -192,7 +192,7 @@ func (b *Bot) Run() {
 			time.Sleep(2 * time.Second)
 		}
 		b.input[chatID] = make(chan string)
-		go editFlashcard(b.flashcards, chatID, b.output, b.input[chatID], b.inactiveInput)
+		go b.editFlashcard(chatID)
 	})
 
 	b.api.Handle("/test", func(m *tba.Message) {
@@ -202,7 +202,7 @@ func (b *Bot) Run() {
 			time.Sleep(2 * time.Second)
 		}
 		b.input[chatID] = make(chan string)
-		go knowledgeTest(b.flashcards, chatID, b.output, b.input[chatID], b.inactiveInput)
+		go b.knowledgeTest(chatID)
 	})
 
 	b.api.Handle("/dodajprzypomnienie", func(m *tba.Message) {
@@ -212,13 +212,13 @@ func (b *Bot) Run() {
 			time.Sleep(2 * time.Second)
 		}
 		b.input[chatID] = make(chan string)
-		go addReminder(b.reminders, chatID, b.output, b.input[chatID], b.inactiveInput)
+		go b.addReminder(chatID)
 	})
 
 	b.api.Handle("/pokazprzypomnienia", func(m *tba.Message) {
 		chatID := chatid(m.Chat.ID)
 
-		go showReminders(b.reminders, chatID, b.output)
+		go b.showReminders(chatID)
 	})
 
 	b.api.Handle(tba.OnText, func(m *tba.Message) {
@@ -253,7 +253,7 @@ func NewBot(token string, env string) *Bot {
 		log.Fatal("Could not create bot")
 	}
 
-	flashcards := make(flashcards)
+	flashcards := make(flashcardsData)
 	_ = ensureDataFileExists(flashcardsFileName)
 	flashcardsData, err := ioutil.ReadFile(flashcardsFileName)
 
@@ -271,7 +271,7 @@ func NewBot(token string, env string) *Bot {
 		}).Fatal("Could not decode file")
 	}
 
-	reminders := make(reminders)
+	reminders := make(remindersData)
 	_ = ensureDataFileExists(remindersFileName)
 	remindersData, err := ioutil.ReadFile(remindersFileName)
 

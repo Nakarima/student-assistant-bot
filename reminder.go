@@ -2,11 +2,11 @@ package main
 
 import (
 	"bytes"
-	"errors"
 	"encoding/json"
+	"errors"
 	"io/ioutil"
-	"time"
 	"text/template"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 )
@@ -23,9 +23,9 @@ type reminder struct {
 	Title string
 }
 
-type reminders map[chatid][]reminder
+type remindersData map[chatid][]reminder
 
-func writeReminders(rd reminders, ioLogger *log.Entry) error {
+func writeReminders(rd remindersData, ioLogger *log.Entry) error {
 	rdJSON, err := json.Marshal(rd)
 	if err != nil {
 		ioLogger.Error("Could not encode reminders")
@@ -40,7 +40,7 @@ func writeReminders(rd reminders, ioLogger *log.Entry) error {
 	return err
 }
 
-func createFromTemplate(rmndrs []reminder, ) (string, error) {
+func createFromTemplate(rmndrs []reminder) (string, error) {
 	tmpl, err := template.New("remindersTemplate").Parse(remindersTemplate)
 	if err != nil {
 		return "", errors.New("template parse error")
@@ -54,41 +54,42 @@ func createFromTemplate(rmndrs []reminder, ) (string, error) {
 	return answerBuff.String(), nil
 }
 
-func showReminders(reminders reminders, chatID chatid, out chan msg) {
+func (b *Bot) showReminders(chatID chatid) {
 	chatLogger := generateDialogLogger(chatID)
-	tmpl, err := createFromTemplate(reminders[chatID])
+	tmpl, err := createFromTemplate(b.remindersData[chatID])
 	if err != nil {
 		chatLogger.Error("Could not parse reminders")
 		return
 	}
-	out <- msg{chatID, tmpl}
+	b.output <- msg{chatID, tmpl}
 }
 
-
-func remind(reminder reminder, chatID chatid, out chan msg) {
+func (b *Bot) remind(reminder reminder, chatID chatid) {
 	select {
 	case <-time.After(reminder.Date.Sub(time.Now()) - 26*time.Hour):
-		out <- msg{chatID, "Przypominam: " + reminder.Title + " " + reminder.Date.Format(dateLayout)}
+		b.output <- msg{chatID, "Przypominam: " + reminder.Title + " " + reminder.Date.Format(dateLayout)}
 	}
 	select {
 	case <-time.After(reminder.Date.Sub(time.Now()) - 2*time.Hour):
-		out <- msg{chatID, "Przypominam: " + reminder.Title + " " + reminder.Date.Format(dateLayout)}
+		b.output <- msg{chatID, "Przypominam: " + reminder.Title + " " + reminder.Date.Format(dateLayout)}
 	}
 }
 
-func setReminders(reminders reminders, out chan msg) {
-	for chatID, perChat := range reminders {
-		for index, rmndr := range perChat {
-			if rmndr.Date.Before(time.Now().Add(2*time.Hour)) {
-				if index < len(perChat)-1 {
-					copy(perChat[index:], perChat[index+1:])
+func (b *Bot) setReminders() {
+	reminders := b.remindersData
+	for chatID, perChatR := range reminders {
+		for index, rmndr := range perChatR {
+			if rmndr.Date.Before(time.Now().Add(2 * time.Hour)) {
+				if index < len(perChatR)-1 {
+					copy(perChatR[index:], perChatR[index+1:])
 				}
-				perChat[len(perChat)-1] = reminder{}
-				perChat = perChat[:len(perChat)-1]
+				perChatR[len(perChatR)-1] = reminder{}
+				perChatR = perChatR[:len(perChatR)-1]
 			} else {
-				go remind(rmndr, chatID, out)
+				go b.remind(rmndr, chatID)
 			}
 		}
+		b.remindersData[chatID] = perChatR
 	}
 
 	ioLogger := generateIoLogger(remindersFileName, "setReminders")
@@ -96,35 +97,36 @@ func setReminders(reminders reminders, out chan msg) {
 	writeReminders(reminders, ioLogger)
 }
 
-func addReminder(rd reminders, chatID chatid, out chan msg, in chan string, endDialog chan chatid) {
+func (b *Bot) addReminder(chatID chatid) {
 	chatLogger := generateDialogLogger(chatID)
 	ioLogger := generateIoLogger(remindersFileName, "addReminder")
-	defer func() { endDialog <- chatID }()
+	defer func() { b.inactiveInput <- chatID }()
+	rd := b.remindersData
 
-	d, err := dialog(out, chatID, "Podaj date w formacie DD-MM-RR HH:MM", in)
+	d, err := b.dialog(chatID, "Podaj date w formacie DD-MM-RR HH:MM")
 	if err != nil {
 		chatLogger.Info("Dialog ended unsuccessfully")
 		return
 	}
 	date, err := time.Parse(dateLayout, d)
 	if err != nil {
-		out <- msg{chatID, "Niepoprawna format daty"}
+		b.output <- msg{chatID, "Niepoprawna format daty"}
 		return
 	}
 
-	if date.Before(time.Now().Add(2*time.Hour)) {
-		out <- msg{chatID, "Data jest z przeszłości, spróbuj ponownie"}
+	if date.Before(time.Now().Add(2 * time.Hour)) {
+		b.output <- msg{chatID, "Data jest z przeszłości, spróbuj ponownie"}
 		return
 	}
 
-	t, err := dialog(out, chatID, "Podaj tytuł przypomnienia", in)
+	t, err := b.dialog(chatID, "Podaj tytuł przypomnienia")
 	if err != nil {
 		chatLogger.Info("Dialog ended unsuccessfully")
 		return
 	}
 
 	rmndr := reminder{date, t}
-	go remind(rmndr, chatID, out)
+	go b.remind(rmndr, chatID)
 
 	if rd[chatID] == nil {
 		rd[chatID] = []reminder{}
@@ -134,10 +136,9 @@ func addReminder(rd reminders, chatID chatid, out chan msg, in chan string, endD
 
 	err = writeReminders(rd, ioLogger)
 	if err != nil {
-		out <- msg{chatID, "Wystapil problem, moga wystapic problemy z tym przypomnieniem w przyszlosci, skontaktuj sie z administratorem"}
-		return
+		b.output <- msg{chatID, "Wystapil problem, moga wystapic problemy z tym przypomnieniem w przyszlosci, skontaktuj sie z administratorem"}
 	}
 
-	out <- msg{chatID, "Dodano przypomnienie"}
-	return
+	b.remindersData[chatID] = rd[chatID]
+	b.output <- msg{chatID, "Dodano przypomnienie"}
 }
