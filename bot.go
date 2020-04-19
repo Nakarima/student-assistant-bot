@@ -28,6 +28,7 @@ type chatid int64
 // Bot struct stores api, data and all necessary channels.
 // FlashcardsData stores all flashcards by chat ID.
 // RemindersData stores all reminders by chat ID.
+// SchedulesData stores all schedules by chat ID.
 // Input is a channel for managing all messages from chats.
 // InactiveInput is a channel that informs bot about exiting dialogs so he can make it available for other dialog.
 // Output is a channel for sending message to chats.
@@ -35,6 +36,7 @@ type Bot struct {
 	api            *tba.Bot
 	FlashcardsData flashcardsData
 	RemindersData  remindersData
+	SchedulesData schedulesData
 	Input          map[chatid]chan string
 	InactiveInput  chan chatid
 	Output         chan Msg
@@ -291,11 +293,13 @@ func NewBot(token string, env string) *Bot {
 		}).Fatal("Could not decode file")
 	}
 
+	schedules := make(schedulesData)
+
 	input := make(map[chatid]chan string)
 	inactiveInput := make(chan chatid)
 	output := make(chan Msg)
 
 	log.Info("Bot authorized")
-	return &Bot{tb, flashcards, reminders, input, inactiveInput, output}
+	return &Bot{tb, flashcards, reminders, schedules, input, inactiveInput, output}
 
 }
