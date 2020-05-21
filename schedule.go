@@ -1,8 +1,15 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"io/ioutil"
 	"strings"
+	"text/template"
 	"time"
+
+	log "github.com/sirupsen/logrus"
 )
 
 const schedulesFileName = "schedules.json"
@@ -20,12 +27,18 @@ const (
 	saturday  Weekday = 6
 	sunday    Weekday = 7
 )
+const dayTemplate = `
+{{ range . }}{{ .Starts.Format "15:04" }} - {{ .Ends.Format "15:04" }} - {{ .Name }}
+{{ end }}`
 
 // Class keeps info about time and name of class.
+// Starts defines which hour they start.
+// Ends defines which hour they end.
+// Name defines name of the class.
 type Class struct {
-	starts time.Time
-	ends   time.Time
-	name   string
+	Starts time.Time
+	Ends   time.Time
+	Name   string
 }
 
 func weekdaysPL() map[string]Weekday {
@@ -56,20 +69,66 @@ func (day Weekday) GetString() string {
 		"niedziela",
 	}
 
-	if day < Sunday || day > Saturday {
+	if day > sunday || day < monday {
 		return "Unknown"
 	}
 
 	return names[day-1]
 }
 
-func classExists(sd schoolDay, c Class) bool {
-	for cl := range sd {
-		if c == cl {
-			return false
+func writeSchedule(sd schedulesData, ioLogger *log.Entry) error {
+	sdJSON, err := json.Marshal(sd)
+	if err != nil {
+		ioLogger.Error("Could not encode schedules")
+		return err
+	}
+
+	err = ioutil.WriteFile(schedulesFileName, sdJSON, 0644)
+	if err != nil {
+		ioLogger.Error("Could not write file")
+		return err
+	}
+	return err
+}
+
+// createDayFromTemplate creates string with good looking format with info about given schedule.
+func createDayFromTemplate(day schoolDay, wd Weekday) (string, error) {
+	tmpl, err := template.New("dayTemplate").Parse(dayTemplate)
+	if err != nil {
+		return "", errors.New("template parse error")
+	}
+
+	var answerBuff bytes.Buffer
+	err = tmpl.Execute(&answerBuff, day)
+	if err != nil {
+		return "", errors.New("template execute error")
+	}
+
+	msg := wd.GetString() + answerBuff.String()
+	return msg, nil
+}
+
+func createScheduleFromTemplate(sd schedule) (string, error) {
+	var msg string
+	for wd, day := range sd {
+		if len(day) > 0 {
+			tmplt, err := createDayFromTemplate(day, wd)
+			if err != nil {
+				return "", err
+			}
+			msg = msg + tmplt + "\n"
 		}
 	}
-	return true
+	return msg, nil
+}
+
+func classExists(sd schoolDay, c Class) bool {
+	for _, cl := range sd {
+		if c == cl {
+			return true
+		}
+	}
+	return false
 }
 
 // AddClass launch dialog for creating a new class. It checks if class exists and if not it will add class to schedules and save it in a file
@@ -87,7 +146,7 @@ func (b *Bot) AddClass(chatID chatid) {
 	w = strings.ToLower(w)
 	wdpl := weekdaysPL()
 	if wdpl[w] == 0 {
-		b.Output <- Msg{chatID, "Taki dzień nie istnieje"}
+		b.Output <- Msg{chatID, "Nie znam takiego dnia :("}
 		return
 	}
 	wd := wdpl[w]
@@ -114,6 +173,11 @@ func (b *Bot) AddClass(chatID chatid) {
 		return
 	}
 
+	if end.Before(start) {
+		b.Output <- Msg{chatID, "Zajęcia nie mogą się kończy przed rozpoczęciem :/"}
+		return
+	}
+
 	n, err := b.Dialog(chatID, "Podaj nazwę")
 	if err != nil {
 		chatLogger.Info("Dialog ended unsuccessfully")
@@ -136,4 +200,22 @@ func (b *Bot) AddClass(chatID chatid) {
 
 	sd[chatID][wd] = append(sd[chatID][wd], c)
 
+	err = writeSchedule(sd, ioLogger)
+	if err != nil {
+		b.Output <- Msg{chatID, "Wystapil problem, moga wystapic problemy z tymi zajęciami w przyszlosci, skontaktuj sie z administratorem"}
+	}
+
+	b.SchedulesData[chatID][wd] = sd[chatID][wd]
+	b.Output <- Msg{chatID, "Dodano przypomnienie"}
+}
+
+// ShowScheduleForDay sends to user schedule of given day
+func (b *Bot) ShowScheduleForDay(chatID chatid, wd Weekday) {
+	chatLogger := generateDialogLogger(chatID)
+	tmpl, err := createScheduleFromTemplate(b.SchedulesData[chatID])
+	if err != nil {
+		chatLogger.Error("Could not parse schedule")
+		return
+	}
+	b.Output <- Msg{chatID, tmpl}
 }

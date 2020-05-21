@@ -43,7 +43,7 @@ func writeReminders(rd remindersData, ioLogger *log.Entry) error {
 }
 
 // createFromTemplate creates string with good looking format with info about given reminders.
-func createFromTemplate(rmndrs []Reminder) (string, error) {
+func createRemindersFromTemplate(rmndrs []Reminder) (string, error) {
 	tmpl, err := template.New("remindersTemplate").Parse(remindersTemplate)
 	if err != nil {
 		return "", errors.New("template parse error")
@@ -60,7 +60,7 @@ func createFromTemplate(rmndrs []Reminder) (string, error) {
 // ShowReminders sends to user all his reminders.
 func (b *Bot) ShowReminders(chatID chatid) {
 	chatLogger := generateDialogLogger(chatID)
-	tmpl, err := createFromTemplate(b.RemindersData[chatID])
+	tmpl, err := createRemindersFromTemplate(b.RemindersData[chatID])
 	if err != nil {
 		chatLogger.Error("Could not parse reminders")
 		return

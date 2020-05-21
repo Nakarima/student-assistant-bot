@@ -225,6 +225,22 @@ func (b *Bot) Run() {
 		go b.ShowReminders(chatID)
 	})
 
+	b.api.Handle("/dodajzajecia", func(m *tba.Message) {
+		chatID := chatid(m.Chat.ID)
+		if _, ok := b.Input[chatID]; ok {
+			b.Input[chatID] <- ""
+			time.Sleep(2 * time.Second)
+		}
+		b.Input[chatID] = make(chan string)
+		go b.AddClass(chatID)
+	})
+
+	b.api.Handle("/pokazzajecia", func(m *tba.Message) {
+		chatID := chatid(m.Chat.ID)
+
+		go b.ShowScheduleForDay(chatID, saturday)
+	})
+
 	b.api.Handle(tba.OnText, func(m *tba.Message) {
 		if d, ok := b.Input[chatid(m.Chat.ID)]; ok {
 			d <- m.Text
@@ -294,6 +310,22 @@ func NewBot(token string, env string) *Bot {
 	}
 
 	schedules := make(schedulesData)
+	_ = ensureDataFileExists(schedulesFileName)
+	schedulesData, err := ioutil.ReadFile(schedulesFileName)
+
+	if err != nil {
+		log.WithFields(log.Fields{
+			"file": schedulesFileName,
+		}).Fatal("Could not read file")
+	}
+
+	err = json.Unmarshal([]byte(schedulesData), &schedules)
+
+	if err != nil {
+		log.WithFields(log.Fields{
+			"file": schedulesFileName,
+		}).Fatal("Could not decode file")
+	}
 
 	input := make(map[chatid]chan string)
 	inactiveInput := make(chan chatid)
