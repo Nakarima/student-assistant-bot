@@ -21,6 +21,11 @@ const funcs = `
 /test -  uruchamia test wiedzy
 /dodajprzypomnienie - uruchamia dialog dodawania przypomnienia
 /pokazprzypomnienia - wypisuje listę aktualnych przypomnień
+/dodajzajecia - uruchamia dialog dodawania zajęć
+/edytujzajecia - uruchamia dialog edytowania zajęć
+/usunzajecia - uruchamia dialog usuwania zajęć
+/plan - wypisuje plan zajec
+/usunplan - uruchamia dialog usuwania zajęć
 `
 
 type chatid int64
@@ -36,7 +41,7 @@ type Bot struct {
 	api            *tba.Bot
 	FlashcardsData flashcardsData
 	RemindersData  remindersData
-	SchedulesData schedulesData
+	SchedulesData  schedulesData
 	Input          map[chatid]chan string
 	InactiveInput  chan chatid
 	Output         chan Msg
@@ -156,7 +161,7 @@ func (b *Bot) Run() {
 	b.SetReminders()
 
 	b.api.Handle("/version", func(m *tba.Message) {
-		b.Output <- Msg{chatid(m.Chat.ID), "version 0.3.1"}
+		b.Output <- Msg{chatid(m.Chat.ID), "version 0.4.0"}
 	})
 
 	b.api.Handle("/help", func(m *tba.Message) {
@@ -235,10 +240,40 @@ func (b *Bot) Run() {
 		go b.AddClass(chatID)
 	})
 
-	b.api.Handle("/pokazzajecia", func(m *tba.Message) {
+	b.api.Handle("/edytujzajecia", func(m *tba.Message) {
+		chatID := chatid(m.Chat.ID)
+		if _, ok := b.Input[chatID]; ok {
+			b.Input[chatID] <- ""
+			time.Sleep(2 * time.Second)
+		}
+		b.Input[chatID] = make(chan string)
+		go b.EditClass(chatID)
+	})
+
+	b.api.Handle("/usunzajecia", func(m *tba.Message) {
+		chatID := chatid(m.Chat.ID)
+		if _, ok := b.Input[chatID]; ok {
+			b.Input[chatID] <- ""
+			time.Sleep(2 * time.Second)
+		}
+		b.Input[chatID] = make(chan string)
+		go b.DeleteClass(chatID)
+	})
+
+	b.api.Handle("/usunplan", func(m *tba.Message) {
+		chatID := chatid(m.Chat.ID)
+		if _, ok := b.Input[chatID]; ok {
+			b.Input[chatID] <- ""
+			time.Sleep(2 * time.Second)
+		}
+		b.Input[chatID] = make(chan string)
+		go b.DeleteSchedule(chatID)
+	})
+
+	b.api.Handle("/plan", func(m *tba.Message) {
 		chatID := chatid(m.Chat.ID)
 
-		go b.ShowScheduleForDay(chatID, saturday)
+		go b.ShowSchedule(chatID)
 	})
 
 	b.api.Handle(tba.OnText, func(m *tba.Message) {
