@@ -1,17 +1,17 @@
 package main
 
 import (
+	log "github.com/sirupsen/logrus"
 	"strconv"
 	"strings"
-	log "github.com/sirupsen/logrus"
 )
 
-// returns flashcards in given range or if range is equal or higher than number of flashcards returns all
-func generateTestFlashcards(fc flashcard, testRange int) flashcard {
+// generateTestFlashcards returns flashcards in given range or if range is equal or higher than number of flashcards returns all flashcards
+func generateTestFlashcards(fc flashcards, testRange int) flashcards {
 	if testRange >= len(fc) {
 		return fc
 	}
-	testFlashcards := make(flashcard)
+	testFlashcards := make(flashcards)
 	i := 0
 	for term, definition := range fc {
 		if i > testRange {
@@ -23,75 +23,72 @@ func generateTestFlashcards(fc flashcard, testRange int) flashcard {
 	return testFlashcards
 }
 
-func askQuestions(fc flashcard, chatID chatid, out chan msg, in chan string, state chan chatid, chatLogger *log.Entry) (int, error) {
-
+// AskQuestions starts dialog in which bot sends definitions and user has to answer with correct term. It returns sum of correct answers.
+func (b *Bot) AskQuestions(fc flashcards, chatID chatid, chatLogger *log.Entry) (int, error) {
 	correctAnswers := 0
 	for term, definition := range fc {
-		answer, err := dialog(out, chatID, "Co to jest? "+definition, in)
+		answer, err := b.Dialog(chatID, "Co to jest? "+definition)
 		if err != nil {
 			chatLogger.Info("Dialog ended unsuccessfully")
-			state <- chatID
 			return 0, err
 		}
 		answer = strings.ToLower(answer)
 		if answer == term {
-			out <- msg{chatID, "Poprawna odpowiedz"}
+			b.Output <- Msg{chatID, "Poprawna odpowiedz"}
 			correctAnswers++
 		} else {
-			out <- msg{chatID, "Bledna odpowiedz, poprawna to: " + strings.Title(term)}
+			b.Output <- Msg{chatID, "Bledna odpowiedz, poprawna to: " + strings.Title(term)}
 		}
-
 	}
+
 	return correctAnswers, nil
 }
 
-func knowledgeTest(fc flashcards, chatID chatid, out chan msg, in chan string, state chan chatid) {
-
+// KnowledgeTest starts dialog in which it asks for topic of flashcards and number of questions. Then it starts AskQuestions. After that it sends to user his score.
+func (b *Bot) KnowledgeTest(chatID chatid) {
 	chatLogger := generateDialogLogger(chatID)
+	defer func() { b.InactiveInput <- chatID }()
+	fc := b.FlashcardsData
 
 	startMessage := "Test twojej wiedzy. Bede podawal definicje roznych pojec, a ty odpowiedz nazwa pojecia. Na poczatek podaj temat, z ktorego chcesz zostac przepytany."
 
-	t, err := dialog(out, chatID, startMessage, in)
+	t, err := b.Dialog(chatID, startMessage)
 	if err != nil {
 		chatLogger.Info("Dialog ended unsuccessfully")
-		state <- chatID
 		return
 	}
 	t = strings.ToLower(t)
 	top := topic(t)
 	//TODO make inline buttons
 	if _, ok := fc[chatID][top]; !ok {
-		out <- msg{chatID, "Temat nie istnieje"}
-		state <- chatID
+		b.Output <- Msg{chatID, "Temat nie istnieje"}
 		return
 	}
 
 	fcTopic := fc[chatID][top]
 
-	testRangeAnswer, err := dialog(out, chatID, "Podaj ilosc pytan, maksymalna ilosc dla tego tematu: "+strconv.Itoa(len(fcTopic)), in)
+	askQuestionsNumber := "Podaj ilosc pytan, maksymalna ilosc dla tego tematu: " + strconv.Itoa(len(fcTopic))
+	testRangeAnswer, err := b.Dialog(chatID, askQuestionsNumber)
 	if err != nil {
 		chatLogger.Info("Dialog ended unsuccessfully")
-		state <- chatID
 		return
 	}
 
 	testRange, err := strconv.Atoi(testRangeAnswer)
 	if err != nil {
 		chatLogger.Info("Dialog ended unsuccessfully")
-		out <- msg{chatID, "Musisz podac liczbe"}
-		state <- chatID
+		b.Output <- Msg{chatID, "Musisz podac liczbe"}
 		return
 	}
 
 	testFlashcards := generateTestFlashcards(fcTopic, testRange)
 
-	correctAnswers, err := askQuestions(testFlashcards, chatID, out, in, state, chatLogger)
+	correctAnswers, err := b.AskQuestions(testFlashcards, chatID, chatLogger)
 	if err != nil {
 		return
 	}
 
 	result := "Odpowiedziales poprawnie na " + strconv.Itoa(correctAnswers) + " z " + testRangeAnswer
 
-	out <- msg{chatID, result}
-
+	b.Output <- Msg{chatID, result}
 }
