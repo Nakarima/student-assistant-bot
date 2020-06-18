@@ -1,9 +1,10 @@
 package main
 
 import (
-	log "github.com/sirupsen/logrus"
 	"strconv"
 	"strings"
+
+	log "github.com/sirupsen/logrus"
 )
 
 // generateTestFlashcards returns flashcards in given range or if range is equal or higher than number of flashcards returns all flashcards
@@ -50,7 +51,7 @@ func (b *Bot) KnowledgeTest(chatID chatid) {
 	defer func() { b.InactiveInput <- chatID }()
 	fc := b.FlashcardsData
 
-	startMessage := "Test twojej wiedzy. Bede podawal definicje roznych pojec, a ty odpowiedz nazwa pojecia. Na poczatek podaj temat, z ktorego chcesz zostac przepytany."
+	startMessage := "Test wiedzy z twoich fiszek. Bede podawal definicje roznych pojec, a ty odpowiedz nazwa pojecia. Na poczatek podaj temat, z ktorego chcesz zostac przepytany."
 
 	t, err := b.Dialog(chatID, startMessage)
 	if err != nil {
